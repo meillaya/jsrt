@@ -17,6 +17,7 @@ typedef enum {
 } VmBuiltinKind;
 
 typedef struct {
+    JsFunction *closure;
     const BytecodeFunction *function;
     size_t ip;
     size_t base;
@@ -130,13 +131,14 @@ static Value *vm_peek(Vm *vm, size_t distance) {
     return &vm->stack[vm->stack_count - 1U - distance];
 }
 
-static bool vm_push_frame(Vm *vm, const BytecodeFunction *function, size_t base) {
+static bool vm_push_frame(Vm *vm, JsFunction *closure, const BytecodeFunction *function, size_t base) {
     size_t i;
     if (vm->frame_count == vm->frame_capacity) {
         size_t new_capacity = vm->frame_capacity == 0 ? 8U : vm->frame_capacity * 2U;
         vm->frames = jsrt_realloc(vm->frames, sizeof(*vm->frames) * new_capacity);
         vm->frame_capacity = new_capacity;
     }
+    vm->frames[vm->frame_count].closure = closure;
     vm->frames[vm->frame_count].function = function;
     vm->frames[vm->frame_count].ip = 0U;
     vm->frames[vm->frame_count].base = base;
@@ -157,6 +159,8 @@ static JsFunction *vm_create_native_function(const char *name, size_t arity, VmB
     function->native_name = name;
     function->native_arity = arity;
     function->bytecode = NULL;
+    function->captures = NULL;
+    function->capture_count = 0U;
     return function;
 }
 
@@ -174,6 +178,12 @@ static JsFunction *vm_create_compiled_function(const BytecodeFunction *function)
     js_function->native_name = NULL;
     js_function->native_arity = function->arity;
     js_function->bytecode = function;
+    js_function->captures = NULL;
+    js_function->capture_count = function->upvalue_count;
+    if (function->upvalue_count > 0U) {
+        js_function->captures = jsrt_malloc(sizeof(*js_function->captures) * function->upvalue_count);
+        memset(js_function->captures, 0, sizeof(*js_function->captures) * function->upvalue_count);
+    }
     return js_function;
 }
 
@@ -320,7 +330,7 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
         goto cleanup;
     }
 
-    vm_push_frame(&vm, &program->functions[0], 0U);
+    vm_push_frame(&vm, NULL, &program->functions[0], 0U);
 
     while (vm.frame_count > 0U) {
         VmFrame *frame = &vm.frames[vm.frame_count - 1U];
@@ -362,6 +372,24 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 size_t slot = frame->base + (size_t)instruction->operand;
                 value_free(vm.stack[slot]);
                 vm.stack[slot] = value;
+                break;
+            }
+            case BC_LOAD_UPVALUE:
+                if (frame->closure == NULL || (size_t)instruction->operand >= frame->closure->capture_count) {
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "invalid upvalue load");
+                    goto cleanup;
+                }
+                vm_push(&vm, value_clone(frame->closure->captures[(size_t)instruction->operand]));
+                break;
+            case BC_STORE_UPVALUE: {
+                Value value = vm_pop(&vm);
+                if (frame->closure == NULL || (size_t)instruction->operand >= frame->closure->capture_count) {
+                    value_free(value);
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "invalid upvalue store");
+                    goto cleanup;
+                }
+                value_free(frame->closure->captures[(size_t)instruction->operand]);
+                frame->closure->captures[(size_t)instruction->operand] = value;
                 break;
             }
             case BC_LOAD_GLOBAL: {
@@ -684,12 +712,29 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     );
                     goto cleanup;
                 }
-                vm_push_frame(&vm, callee->as.function->bytecode, callee_index + 1U);
+                vm_push_frame(&vm, callee->as.function, callee->as.function->bytecode, callee_index + 1U);
                 break;
             }
             case BC_MAKE_FUNCTION:
-                vm_push(&vm, value_function(vm_create_compiled_function(&program->functions[(size_t)instruction->operand])));
+            {
+                JsFunction *closure = vm_create_compiled_function(&program->functions[(size_t)instruction->operand]);
+                size_t i;
+                for (i = 0; i < closure->capture_count; ++i) {
+                    BytecodeUpvalue upvalue = closure->bytecode->upvalues[i];
+                    if (upvalue.is_local) {
+                        closure->captures[i] = value_clone(vm.stack[frame->base + upvalue.index]);
+                    } else {
+                        if (frame->closure == NULL || upvalue.index >= frame->closure->capture_count) {
+                            result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "invalid upvalue capture");
+                            value_free(value_function(closure));
+                            goto cleanup;
+                        }
+                        closure->captures[i] = value_clone(frame->closure->captures[upvalue.index]);
+                    }
+                }
+                vm_push(&vm, value_function(closure));
                 break;
+            }
             case BC_RETURN: {
                 Value return_value = vm_pop(&vm);
 

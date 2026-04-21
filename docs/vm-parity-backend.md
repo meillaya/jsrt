@@ -24,7 +24,9 @@ Included:
 - `do...while`
 - `switch`
 - `break` / `continue`
-- top-level and nested non-capturing function declarations/calls
+- function declarations/calls
+- function expressions
+- closure capture for the current parity-tested surface
 - built-ins `print`, `len`, `typeOf`
 - array literals
 - object literals
@@ -32,9 +34,7 @@ Included:
 - property/index assignment
 
 Still deferred:
-- closures/upvalues
-- function expressions
-- capturing nested functions
+- broader closure-semantics hardening beyond the current parity-tested surface
 
 ## CLI switch
 

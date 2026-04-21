@@ -14,6 +14,8 @@ typedef enum {
     BC_DUP,
     BC_LOAD_LOCAL,
     BC_STORE_LOCAL,
+    BC_LOAD_UPVALUE,
+    BC_STORE_UPVALUE,
     BC_LOAD_GLOBAL,
     BC_STORE_GLOBAL,
     BC_DEFINE_GLOBAL,
@@ -46,10 +48,18 @@ typedef struct BytecodeInstruction {
     int operand;
 } BytecodeInstruction;
 
+typedef struct {
+    bool is_local;
+    size_t index;
+} BytecodeUpvalue;
+
 typedef struct BytecodeFunction {
     char *name;
     size_t arity;
     size_t local_count;
+    BytecodeUpvalue *upvalues;
+    size_t upvalue_count;
+    size_t upvalue_capacity;
     BytecodeInstruction *instructions;
     size_t instruction_count;
     size_t instruction_capacity;

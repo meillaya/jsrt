@@ -27,7 +27,9 @@ Included:
 - `do...while`
 - `switch`
 - `break` / `continue`
-- top-level and nested non-capturing function declarations
+- function declarations
+- function expressions
+- closure capture lowering via upvalues
 - function calls
 - array literals
 - object literals
@@ -36,9 +38,7 @@ Included:
 - built-in calls as ordinary global loads/calls
 
 Deferred in M7:
-- function expressions
-- closures/upvalues
-- capturing nested functions
+- broad/full closure semantics auditing beyond the current parity-tested surface
 
 ## Testing shape
 

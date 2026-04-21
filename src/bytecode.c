@@ -15,6 +15,8 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_DUP: return "DUP";
         case BC_LOAD_LOCAL: return "LOAD_LOCAL";
         case BC_STORE_LOCAL: return "STORE_LOCAL";
+        case BC_LOAD_UPVALUE: return "LOAD_UPVALUE";
+        case BC_STORE_UPVALUE: return "STORE_UPVALUE";
         case BC_LOAD_GLOBAL: return "LOAD_GLOBAL";
         case BC_STORE_GLOBAL: return "STORE_GLOBAL";
         case BC_DEFINE_GLOBAL: return "DEFINE_GLOBAL";
@@ -63,6 +65,7 @@ void bytecode_program_free(BytecodeProgram *program) {
         BytecodeFunction *function = &program->functions[i];
         size_t j;
         free(function->name);
+        free(function->upvalues);
         free(function->instructions);
         for (j = 0; j < function->constant_count; ++j) {
             value_free(function->constants[j]);
@@ -115,6 +118,8 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
             );
         case BC_LOAD_LOCAL:
         case BC_STORE_LOCAL:
+        case BC_LOAD_UPVALUE:
+        case BC_STORE_UPVALUE:
         case BC_CALL:
         case BC_JUMP:
         case BC_JUMP_IF_FALSE:

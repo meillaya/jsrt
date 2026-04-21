@@ -137,22 +137,29 @@ void run_bytecode_tests(TestContext *ctx) {
             "}\n";
         BytecodeProgram program;
         char *error = NULL;
+        char *disassembly;
 
-        EXPECT_FALSE(ctx, compile_source_text(source, &program, &error));
-        EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "closure capture is not supported") != NULL);
-        free(error);
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "function inner arity=1") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "LOAD_UPVALUE") != NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
     }
 
     {
         const char *source = "let f = function (n) { return n; };\n";
         BytecodeProgram program;
         char *error = NULL;
+        char *disassembly;
 
-        EXPECT_FALSE(ctx, compile_source_text(source, &program, &error));
-        EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "function expressions with VM parity remain deferred") != NULL);
-        free(error);
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "MAKE_FUNCTION") != NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
     }
 
     {

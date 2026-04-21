@@ -140,6 +140,11 @@ static void gc_sweep_env(Env *env) {
 }
 
 static void gc_sweep_function(JsFunction *function) {
+    size_t i;
+    for (i = 0; i < function->capture_count; ++i) {
+        value_release_reference(function->captures[i]);
+    }
+    free(function->captures);
     free(function);
 }
 

@@ -145,6 +145,35 @@ void run_vm_tests(TestContext *ctx) {
     );
     assert_backend_parity(
         ctx,
+        "function makeAdder(base) {\n"
+        "  function add(n) { return base + n; }\n"
+        "  return add;\n"
+        "}\n"
+        "let add3 = makeAdder(3);\n"
+        "add3(4);\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let makeAdder = function (base) {\n"
+        "  return function (n) { return base + n; };\n"
+        "};\n"
+        "let add3 = makeAdder(3);\n"
+        "add3(8);\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function makeCounter(start) {\n"
+        "  let current = start;\n"
+        "  return function (step) {\n"
+        "    current = current + step;\n"
+        "    return current;\n"
+        "  };\n"
+        "}\n"
+        "let counter = makeCounter(2);\n"
+        "counter(3) + counter(4);\n"
+    );
+    assert_backend_parity(
+        ctx,
         "let values = [1, 2, 3, 4];\n"
         "let meta = {name: \"jsrt\", third: values[2], nested: {label: \"runtime\"}};\n"
         "meta.name + \":\" + meta.third + \":\" + meta.nested.label;\n"
@@ -190,14 +219,17 @@ void run_vm_tests(TestContext *ctx) {
     {
         char *error = NULL;
         EvalResult result = eval_vm_source(
-            "let makeAdder = function (base) {\n"
-            "  return function (n) { return base + n; };\n"
-            "};\n",
+            "function outer(n) {\n"
+            "  function inner(x) { return x - n; }\n"
+            "  return inner;\n"
+            "}\n"
+            "let add = outer(3);\n"
+            "add({bad: true});\n",
             &error
         );
         EXPECT_TRUE(ctx, result.had_error);
         EXPECT_TRUE(ctx, result.error_message != NULL);
-        EXPECT_TRUE(ctx, strstr(result.error_message, "function expressions with VM parity remain deferred") != NULL);
+        EXPECT_TRUE(ctx, strstr(result.error_message, "binary operator expects numbers") != NULL);
         eval_result_free(&result);
     }
 

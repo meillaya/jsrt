@@ -119,18 +119,17 @@ Current baseline/process artifacts live in:
 
 ## Current roadmap focus
 
-The active runtime milestone is **M9 — VM surface widening I**. Its execution contract lives in:
-- `.omx/plans/prd-javascript-runtime-roadmap-m9-vm-surface-widening-i.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m9-vm-surface-widening-i.md`
+The active runtime milestone is **M10 — VM closure + function-expression parity**. Its execution contract lives in:
+- `.omx/plans/prd-javascript-runtime-roadmap-m10-vm-closure-function-expression-parity.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m10-vm-closure-function-expression-parity.md`
 - `docs/vm-parity-backend.md`
 
-M9 stays intentionally bounded:
-1. widen VM/compiler support for aggregates and deferred structured control flow
-2. keep closure/upvalue cases explicit and still unsupported
-3. prove parity against tree-walk on the widened subset
+M10 stays intentionally bounded:
+1. add closure capture and function-expression support on the VM path
+2. prove parity against tree-walk on the existing closure-oriented examples/tests
 4. keep the VM opt-in while tree-walk remains semantic authority
 
-Likely follow-ons after M9:
-1. closure/upvalue work only if later milestones explicitly widen the backend subset again
+Likely follow-ons after M10:
+1. broader closure-semantics hardening only if later milestones explicitly require it
 2. future backend expansion only after bounded parity evidence exists
 3. performance/benchmark work once backend scope stabilizes

@@ -235,6 +235,16 @@ It is designed to be execution-ready for later use by **Ralph** or **Team**, and
 - **Verification shape:** widened parity suite; backend-switch example run; ASan/debug builds
 - **Risk level:** High
 
+### M10. VM closure + function-expression parity
+- **Horizon:** Mid-term
+- **Goal:** Add closure capture and function-expression support to the opt-in VM/backend subset.
+- **Key deliverables:** compiler upvalue lowering; captured-value runtime support; parity suite expansion; updated docs/examples
+- **Dependencies:** M9
+- **Recommended execution mode:** `team`
+- **Suggested primary lanes/roles:** `executor`, `debugger`, `test-engineer`, `verifier`
+- **Verification shape:** closure/function-expression parity suite; ASan/debug builds
+- **Risk level:** High
+
 ## Long-term horizon
 
 ### L1. Benchmark and profiling harness

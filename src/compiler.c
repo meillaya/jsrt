@@ -15,6 +15,11 @@ typedef struct {
 } Local;
 
 typedef struct {
+    bool is_local;
+    size_t index;
+} ResolvedUpvalue;
+
+typedef struct {
     int *items;
     size_t count;
     size_t capacity;
@@ -105,6 +110,9 @@ static BytecodeFunction *add_function(BytecodeProgram *program, const char *name
     function->name = name != NULL ? jsrt_strdup(name) : NULL;
     function->arity = arity;
     function->local_count = 0;
+    function->upvalues = NULL;
+    function->upvalue_count = 0;
+    function->upvalue_capacity = 0;
     function->instructions = NULL;
     function->instruction_count = 0;
     function->instruction_capacity = 0;
@@ -138,6 +146,23 @@ static int add_constant(BytecodeFunction *function, Value value) {
     }
     function->constants[function->constant_count] = value;
     return (int)function->constant_count++;
+}
+
+static int add_upvalue(BytecodeFunction *function, bool is_local, size_t index) {
+    size_t i;
+    for (i = 0; i < function->upvalue_count; ++i) {
+        if (function->upvalues[i].is_local == is_local && function->upvalues[i].index == index) {
+            return (int)i;
+        }
+    }
+    if (function->upvalue_count == function->upvalue_capacity) {
+        size_t new_capacity = function->upvalue_capacity == 0 ? 4U : function->upvalue_capacity * 2U;
+        function->upvalues = jsrt_realloc(function->upvalues, sizeof(*function->upvalues) * new_capacity);
+        function->upvalue_capacity = new_capacity;
+    }
+    function->upvalues[function->upvalue_count].is_local = is_local;
+    function->upvalues[function->upvalue_count].index = index;
+    return (int)function->upvalue_count++;
 }
 
 static int emit_instruction(BytecodeFunction *function, BytecodeOp op, int operand) {
@@ -177,15 +202,25 @@ static int resolve_local(const Compiler *compiler, const char *name) {
     return -1;
 }
 
-static bool resolve_captured_name(const Compiler *compiler, const char *name) {
-    const Compiler *current = compiler->parent;
-    while (current != NULL) {
-        if (resolve_local(current, name) >= 0) {
-            return true;
-        }
-        current = current->parent;
+static int resolve_upvalue(Compiler *compiler, const char *name) {
+    int local;
+    int parent_upvalue;
+
+    if (compiler->parent == NULL) {
+        return -1;
     }
-    return false;
+
+    local = resolve_local(compiler->parent, name);
+    if (local >= 0) {
+        return add_upvalue(compiler->function, true, (size_t)local);
+    }
+
+    parent_upvalue = resolve_upvalue(compiler->parent, name);
+    if (parent_upvalue >= 0) {
+        return add_upvalue(compiler->function, false, (size_t)parent_upvalue);
+    }
+
+    return -1;
 }
 
 static bool declare_local(Compiler *compiler, const char *name, int line, int column, char **error_message) {
@@ -226,19 +261,18 @@ static bool declare_local(Compiler *compiler, const char *name, int line, int co
 
 static bool compile_identifier_load(Compiler *compiler, const char *name, int line, int column, char **error_message) {
     int slot = resolve_local(compiler, name);
+    int upvalue;
+    (void)line;
+    (void)column;
+    (void)error_message;
     if (slot >= 0) {
         emit_instruction(compiler->function, BC_LOAD_LOCAL, slot);
         return true;
     }
-    if (resolve_captured_name(compiler, name)) {
-        return set_compile_error_take(
-            compiler->source,
-            line,
-            column,
-            (int)strlen(name),
-            jsrt_format("closure capture is not supported by the VM surface widening milestone ('%s')", name),
-            error_message
-        );
+    upvalue = resolve_upvalue(compiler, name);
+    if (upvalue >= 0) {
+        emit_instruction(compiler->function, BC_LOAD_UPVALUE, upvalue);
+        return true;
     }
     emit_instruction(compiler->function, BC_LOAD_GLOBAL, add_global_symbol(compiler->program, name));
     return true;
@@ -246,19 +280,18 @@ static bool compile_identifier_load(Compiler *compiler, const char *name, int li
 
 static bool compile_identifier_store(Compiler *compiler, const char *name, int line, int column, char **error_message) {
     int slot = resolve_local(compiler, name);
+    int upvalue;
+    (void)line;
+    (void)column;
+    (void)error_message;
     if (slot >= 0) {
         emit_instruction(compiler->function, BC_STORE_LOCAL, slot);
         return true;
     }
-    if (resolve_captured_name(compiler, name)) {
-        return set_compile_error_take(
-            compiler->source,
-            line,
-            column,
-            (int)strlen(name),
-            jsrt_format("closure capture is not supported by the VM surface widening milestone ('%s')", name),
-            error_message
-        );
+    upvalue = resolve_upvalue(compiler, name);
+    if (upvalue >= 0) {
+        emit_instruction(compiler->function, BC_STORE_UPVALUE, upvalue);
+        return true;
     }
     emit_instruction(compiler->function, BC_STORE_GLOBAL, add_global_symbol(compiler->program, name));
     return true;
@@ -285,6 +318,7 @@ static bool compile_function_body(
     int *out_index
 ) {
     Compiler child;
+    int function_index = (int)parent->program->function_count;
     BytecodeFunction *function = add_function(parent->program, name != NULL ? name : "<anonymous>", params->count);
     size_t i;
 
@@ -314,7 +348,7 @@ static bool compile_function_body(
     emit_instruction(function, BC_NULL, 0);
     emit_instruction(function, BC_RETURN, 0);
     free(child.locals);
-    *out_index = (int)(parent->program->function_count - 1U);
+    *out_index = function_index;
     return true;
 }
 
@@ -471,8 +505,22 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             }
             emit_instruction(compiler->function, BC_CALL, (int)expr->as.call.arguments.count);
             return true;
-        case EXPR_FUNCTION:
-            return set_compile_error(compiler->source, expr->line, expr->column, 1, "function expressions with VM parity remain deferred pending closure support", error_message);
+        case EXPR_FUNCTION: {
+            int function_index;
+            if (!compile_function_body(
+                    compiler,
+                    expr->as.function.name,
+                    &expr->as.function.params,
+                    &expr->as.function.body,
+                    expr->line,
+                    expr->column,
+                    error_message,
+                    &function_index)) {
+                return false;
+            }
+            emit_instruction(compiler->function, BC_MAKE_FUNCTION, function_index);
+            return true;
+        }
         case EXPR_ARRAY:
             for (i = 0; i < expr->as.array.elements.count; ++i) {
                 if (!compile_expression(compiler, expr->as.array.elements.items[i], error_message)) {

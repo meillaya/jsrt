@@ -13,6 +13,7 @@ typedef struct Env Env;
 typedef struct JsArray JsArray;
 typedef struct JsObjectEntry JsObjectEntry;
 typedef struct JsObject JsObject;
+typedef struct Value Value;
 
 typedef struct JsFunction {
     GcHeader gc;
@@ -23,6 +24,8 @@ typedef struct JsFunction {
     const char *native_name;
     size_t native_arity;
     const struct BytecodeFunction *bytecode;
+    Value *captures;
+    size_t capture_count;
 } JsFunction;
 
 typedef enum {
