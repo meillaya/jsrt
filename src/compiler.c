@@ -573,6 +573,7 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
 bool compile_program(const StmtArray *program, const char *source, BytecodeProgram *out_program, char **error_message) {
     Compiler compiler;
     BytecodeFunction *script;
+    size_t i;
 
     if (error_message != NULL) {
         *error_message = NULL;
@@ -591,13 +592,26 @@ bool compile_program(const StmtArray *program, const char *source, BytecodeProgr
     compiler.scope_depth = 0;
     compiler.is_script = true;
 
-    if (!compile_statement_list(&compiler, program, error_message)) {
-        free(compiler.locals);
-        bytecode_program_free(out_program);
-        return false;
+    for (i = 0; i < program->count; ++i) {
+        const Stmt *stmt = program->items[i];
+        bool is_last = i + 1U == program->count;
+
+        if (is_last && stmt->kind == STMT_EXPR) {
+            if (!compile_expression(&compiler, stmt->as.expr.expression, error_message)) {
+                free(compiler.locals);
+                bytecode_program_free(out_program);
+                return false;
+            }
+        } else if (!compile_statement(&compiler, stmt, error_message)) {
+            free(compiler.locals);
+            bytecode_program_free(out_program);
+            return false;
+        }
     }
 
-    emit_instruction(script, BC_NULL, 0);
+    if (program->count == 0U || program->items[program->count - 1U]->kind != STMT_EXPR) {
+        emit_instruction(script, BC_NULL, 0);
+    }
     emit_instruction(script, BC_RETURN, 0);
     free(compiler.locals);
     return true;

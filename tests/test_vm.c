@@ -1,0 +1,168 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "jsrt/ast.h"
+#include "jsrt/compiler.h"
+#include "jsrt/eval.h"
+#include "jsrt/lexer.h"
+#include "jsrt/parser.h"
+#include "jsrt/vm.h"
+#include "test.h"
+
+static bool parse_source_text(const char *source, TokenArray *tokens, StmtArray *program, char **error_message) {
+    stmt_array_init(program);
+    if (!lex_source(source, tokens, error_message)) {
+        return false;
+    }
+    if (!parse_tokens(tokens, source, program, error_message)) {
+        token_array_free(tokens);
+        return false;
+    }
+    return true;
+}
+
+static EvalResult eval_treewalk_source(const char *source, char **error_message) {
+    TokenArray tokens;
+    StmtArray program;
+    Env *env;
+    EvalResult result;
+
+    *error_message = NULL;
+    if (!parse_source_text(source, &tokens, &program, error_message)) {
+        EvalResult failure;
+        failure.had_error = true;
+        failure.is_return = false;
+        failure.is_break = false;
+        failure.is_continue = false;
+        failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
+        failure.error_message = *error_message;
+        return failure;
+    }
+
+    env = env_create(NULL);
+    result = eval_program(&program, source, env);
+    env_destroy(env);
+    gc_collect_with_reason(NULL, result.had_error ? NULL : &result.value, "test-result-cleanup");
+    stmt_array_free(&program);
+    token_array_free(&tokens);
+    return result;
+}
+
+static EvalResult eval_vm_source(const char *source, char **error_message) {
+    TokenArray tokens;
+    StmtArray program;
+    BytecodeProgram bytecode;
+    EvalResult result;
+
+    *error_message = NULL;
+    if (!parse_source_text(source, &tokens, &program, error_message)) {
+        EvalResult failure;
+        failure.had_error = true;
+        failure.is_return = false;
+        failure.is_break = false;
+        failure.is_continue = false;
+        failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
+        failure.error_message = *error_message;
+        return failure;
+    }
+
+    if (!compile_program(&program, source, &bytecode, error_message)) {
+        EvalResult failure;
+        stmt_array_free(&program);
+        token_array_free(&tokens);
+        failure.had_error = true;
+        failure.is_return = false;
+        failure.is_break = false;
+        failure.is_continue = false;
+        failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_INTERNAL;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
+        failure.error_message = *error_message;
+        return failure;
+    }
+
+    result = vm_execute_program(&bytecode, source);
+    bytecode_program_free(&bytecode);
+    stmt_array_free(&program);
+    token_array_free(&tokens);
+    return result;
+}
+
+static void assert_backend_parity(TestContext *ctx, const char *source) {
+    char *error = NULL;
+    EvalResult tree = eval_treewalk_source(source, &error);
+    EvalResult vm = eval_vm_source(source, &error);
+
+    EXPECT_FALSE(ctx, tree.had_error);
+    EXPECT_FALSE(ctx, vm.had_error);
+    if (!tree.had_error && !vm.had_error) {
+        EXPECT_TRUE(ctx, value_equals(tree.value, vm.value));
+    }
+    value_free(tree.value);
+    value_free(vm.value);
+    eval_result_free(&tree);
+    eval_result_free(&vm);
+}
+
+void run_vm_tests(TestContext *ctx) {
+    assert_backend_parity(ctx, "let x = 1 + 2 * 3; x;\n");
+    assert_backend_parity(
+        ctx,
+        "let x = 10;\n"
+        "if (x > 5) { x = x * 2; } else { x = 0; }\n"
+        "x;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function add(a, b) { return a + b; }\n"
+        "let value = add(3, 4);\n"
+        "value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let total = 0;\n"
+        "let i = 0;\n"
+        "while (i < 4) { total = total + i; i = i + 1; }\n"
+        "typeOf(total) + \":\" + len(\"hello\") + \":\" + total;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function bump(n) { return n + 1; }\n"
+        "let value = 0;\n"
+        "for (let i = 0; i < 3; i = i + 1) { value = bump(value); }\n"
+        "value;\n"
+    );
+
+    {
+        char *error = NULL;
+        EvalResult result = eval_vm_source("let arr = [1, 2, 3];\n", &error);
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_TRUE(ctx, result.error_message != NULL);
+        EXPECT_TRUE(ctx, strstr(result.error_message, "aggregate bytecode lowering is deferred") != NULL);
+        eval_result_free(&result);
+    }
+
+    {
+        FILE *file;
+        char buffer[128];
+        EXPECT_INT_EQ(ctx, system("JSRT_BACKEND=vm ./build/jsrt examples/vm_subset.js > build/vm-example.out"), 0);
+        file = fopen("build/vm-example.out", "r");
+        EXPECT_TRUE(ctx, file != NULL);
+        if (file != NULL) {
+            EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
+            EXPECT_STRING_EQ(ctx, buffer, "number:5:12\n");
+            fclose(file);
+        }
+    }
+}

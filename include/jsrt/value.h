@@ -8,6 +8,7 @@
 
 struct Expr;
 struct Stmt;
+struct BytecodeFunction;
 typedef struct Env Env;
 typedef struct JsArray JsArray;
 typedef struct JsObjectEntry JsObjectEntry;
@@ -21,6 +22,7 @@ typedef struct JsFunction {
     Env *closure;
     const char *native_name;
     size_t native_arity;
+    const struct BytecodeFunction *bytecode;
 } JsFunction;
 
 typedef enum {

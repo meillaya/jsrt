@@ -163,6 +163,7 @@ static JsFunction *create_user_function(const Stmt *declaration, const Expr *exp
     function->closure = closure;
     function->native_name = NULL;
     function->native_arity = 0U;
+    function->bytecode = NULL;
     return function;
 }
 
@@ -175,6 +176,7 @@ static JsFunction *create_native_function(const char *name, size_t arity, Builti
     function->closure = NULL;
     function->native_name = name;
     function->native_arity = arity;
+    function->bytecode = NULL;
     return function;
 }
 

@@ -10,6 +10,7 @@ int main(void) {
     run_eval_tests(&ctx);
     run_diagnostics_tests(&ctx);
     run_bytecode_tests(&ctx);
+    run_vm_tests(&ctx);
 
     if (ctx.failed != 0) {
         fprintf(stderr, "Tests failed: %d passed, %d failed\n", ctx.passed, ctx.failed);

@@ -37,12 +37,12 @@ typedef enum {
     BC_RETURN
 } BytecodeOp;
 
-typedef struct {
+typedef struct BytecodeInstruction {
     BytecodeOp op;
     int operand;
 } BytecodeInstruction;
 
-typedef struct {
+typedef struct BytecodeFunction {
     char *name;
     size_t arity;
     size_t local_count;
@@ -54,7 +54,7 @@ typedef struct {
     size_t constant_capacity;
 } BytecodeFunction;
 
-typedef struct {
+typedef struct BytecodeProgram {
     BytecodeFunction *functions;
     size_t function_count;
     size_t function_capacity;

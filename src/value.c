@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "jsrt/ast.h"
+#include "jsrt/bytecode.h"
 #include "jsrt/env.h"
 #include "jsrt/gc.h"
 #include "jsrt/memory.h"
@@ -275,6 +276,10 @@ static char *value_to_string_internal(Value value, const ValueStringifyFrame *fr
         case VALUE_FUNCTION:
             if (value.as.function != NULL && value.as.function->is_native && value.as.function->native_name != NULL) {
                 return jsrt_format("<builtin %s>", value.as.function->native_name);
+            }
+            if (value.as.function != NULL && value.as.function->bytecode != NULL &&
+                value.as.function->bytecode->name != NULL) {
+                return jsrt_format("<function %s>", value.as.function->bytecode->name);
             }
             if (value.as.function != NULL && value.as.function->declaration != NULL &&
                 value.as.function->declaration->kind == STMT_FUNCTION) {

@@ -10,6 +10,7 @@ The interpreter currently supports:
 - explicit AST
 - tree-walk evaluator
 - bytecode compiler/disassembler MVP for a bounded subset
+- opt-in VM parity backend for that bounded subset
 - variables
 - arithmetic and comparison operators
 - string literals and string concatenation with `+`
@@ -87,6 +88,7 @@ make test
 ./build/jsrt examples/const.js
 ./build/jsrt examples/references.js
 ./build/jsrt examples/builtins.js
+JSRT_BACKEND=vm ./build/jsrt examples/vm_subset.js
 ```
 
 ## Repository layout
@@ -110,22 +112,23 @@ Current baseline/process artifacts live in:
 - `docs/bytecode-ir-architecture-spike.md`
 - `docs/bytecode-compiler-mvp.md`
 - `docs/gc-observability-and-stress.md`
+- `docs/vm-parity-backend.md`
 - `docs/runtime-error-model.md`
 
 ## Current roadmap focus
 
-The active runtime milestone is **M7 — bytecode compiler MVP**. Its execution contract lives in:
-- `.omx/plans/prd-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
-- `docs/bytecode-compiler-mvp.md`
+The active runtime milestone is **M8 — VM interpreter parity backend**. Its execution contract lives in:
+- `.omx/plans/prd-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+- `docs/vm-parity-backend.md`
 
-M7 stays intentionally bounded:
-1. compile a bytecode subset without executing it yet
-2. provide stable disassembly for compiler-focused tests
-3. reject deferred backend features explicitly instead of miscompiling them
-4. keep tree-walk evaluation as the only executing backend until M8
+M8 stays intentionally bounded:
+1. execute the M7 bytecode subset on a stack VM
+2. prove parity against tree-walk on representative programs
+3. keep the VM opt-in while tree-walk remains semantic authority
+4. leave unsupported backend surface explicit instead of pretending full parity exists
 
-Likely follow-ons after M7:
-1. M8 — VM interpreter parity backend for the bounded subset
-2. future backend expansion only after bounded parity evidence exists
-3. closure/upvalue work only if later milestones explicitly widen the backend subset
+Likely follow-ons after M8:
+1. future backend expansion only after bounded parity evidence exists
+2. closure/upvalue work only if later milestones explicitly widen the backend subset
+3. performance/benchmark work once backend scope stabilizes

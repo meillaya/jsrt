@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "jsrt/ast.h"
+#include "jsrt/bytecode.h"
+#include "jsrt/compiler.h"
 #include "jsrt/env.h"
 #include "jsrt/eval.h"
 #include "jsrt/gc.h"
@@ -10,6 +12,7 @@
 #include "jsrt/memory.h"
 #include "jsrt/parser.h"
 #include "jsrt/value.h"
+#include "jsrt/vm.h"
 
 static char *read_file(const char *path) {
     FILE *file = fopen(path, "rb");
@@ -46,12 +49,15 @@ int main(int argc, char **argv) {
     char *source;
     TokenArray tokens;
     StmtArray program;
+    BytecodeProgram bytecode;
     char *error = NULL;
     Env *env = NULL;
     EvalResult result = {false, false, false, false, {VALUE_NULL, {0}}, RUNTIME_ERROR_NONE, 0, 0, 0, NULL};
     int exit_code = 0;
     bool lexed = false;
     bool parsed = false;
+    bool backend_vm = false;
+    bool bytecode_ready = false;
 
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <script.js>\n", argv[0]);
@@ -61,6 +67,7 @@ int main(int argc, char **argv) {
     if (env_flag_enabled(getenv("JSRT_GC_TRACE"))) {
         gc_set_trace_enabled(true);
     }
+    backend_vm = getenv("JSRT_BACKEND") != NULL && strcmp(getenv("JSRT_BACKEND"), "vm") == 0;
 
     source = read_file(argv[1]);
     if (source == NULL) {
@@ -82,8 +89,18 @@ int main(int argc, char **argv) {
     }
     parsed = true;
 
-    env = env_create(NULL);
-    result = eval_program(&program, source, env);
+    if (backend_vm) {
+        if (!compile_program(&program, source, &bytecode, &error)) {
+            fprintf(stderr, "%s\n", error);
+            exit_code = 1;
+            goto cleanup;
+        }
+        bytecode_ready = true;
+        result = vm_execute_program(&bytecode, source);
+    } else {
+        env = env_create(NULL);
+        result = eval_program(&program, source, env);
+    }
     if (result.had_error) {
         fprintf(stderr, "%s\n", result.error_message);
         exit_code = 1;
@@ -105,6 +122,9 @@ cleanup:
     gc_collect_with_reason(NULL, NULL, "process-cleanup");
     if (parsed) {
         stmt_array_free(&program);
+    }
+    if (bytecode_ready) {
+        bytecode_program_free(&bytecode);
     }
     if (lexed) {
         token_array_free(&tokens);

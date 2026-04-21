@@ -5,6 +5,7 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 ## Runtime contract
 
 - The CLI executes a single script file: `./build/jsrt <script.js>`.
+- `JSRT_BACKEND=vm ./build/jsrt <script.js>` opts into the bounded VM backend for the compiler-supported subset.
 - On success, the CLI prints the final non-`null` program value as a string plus newline.
 - On lexer/parser/runtime failure, the CLI prints a source-based diagnostic and exits non-zero.
 
