@@ -12,6 +12,7 @@ The interpreter currently supports:
 - variables
 - arithmetic and comparison operators
 - string literals and string concatenation with `+`
+- built-in functions: `print`, `len`, `typeOf`
 - array literals and indexing
 - object literals with dot / bracket access
 - property and index assignment with shared-reference aggregate semantics
@@ -84,6 +85,7 @@ make test
 ./build/jsrt examples/function_expressions.js
 ./build/jsrt examples/const.js
 ./build/jsrt examples/references.js
+./build/jsrt examples/builtins.js
 ```
 
 ## Repository layout
@@ -103,22 +105,23 @@ Current baseline/process artifacts live in:
 - `docs/ownership-guardrails.md`
 - `docs/milestone-verification-checklist.md`
 - `docs/diagnostics-golden-harness.md`
+- `docs/built-in-library-foundation.md`
 - `docs/gc-observability-and-stress.md`
 
 ## Current roadmap focus
 
-The active runtime milestone is **M3 — mutable aggregate/reference model implementation**. Its execution contract lives in:
-- `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md`
-- `.omx/plans/prd-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
+The active runtime milestone is **M4 — built-in library foundation**. Its execution contract lives in:
+- `.omx/plans/prd-javascript-runtime-roadmap-m4-built-in-library-foundation.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m4-built-in-library-foundation.md`
+- `docs/built-in-library-foundation.md`
 
-M3 implements the M2 decision while staying intentionally bounded:
-1. stop cloning arrays/objects across environment boundaries
-2. make alias-visible mutation work through bindings, nested access, function arguments, and returns
-3. keep strings/scalars unchanged and keep GC scope bounded
-4. harden cyclic aggregate stringification/equality enough to stay safe
+M4 stays intentionally narrow:
+1. add a minimal native-call abstraction
+2. expose `print`, `len`, and `typeOf` as global built-ins
+3. keep diagnostics source-based for misuse
+4. avoid broad host embedding or standard-library sprawl
 
-Likely follow-ons after M3:
-1. M4 — built-in library foundation on the clarified aggregate model
+Likely follow-ons after M4:
+1. M5 — runtime error model cleanup as the runtime surface grows
 2. M6 — backend/IR planning on the cleaner heap model
-3. M5 — runtime error model cleanup as the runtime surface grows
+3. future built-in expansion only if later milestones explicitly require it

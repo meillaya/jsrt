@@ -33,7 +33,7 @@ Still outside GC scope:
 |---|---|
 | Number / bool / null | plain value, no heap payload |
 | String | `Value` owns heap string and frees it in `value_free` |
-| Function | managed-heap object traced through reachable env/value roots |
+| Function | managed-heap object traced through reachable env/value roots; built-ins are native functions with no captured closure |
 | Array | managed-heap aggregate traced through reachable env/value roots |
 | Object | managed-heap aggregate traced through reachable env/value roots |
 

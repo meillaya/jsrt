@@ -117,6 +117,41 @@ void run_eval_tests(TestContext *ctx) {
     value_free(result.value);
     eval_result_free(&result);
 
+    result = evaluate_source("len(\"hello\");\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 5.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("len([1, 2, 3]);\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 3.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("len({name: \"jsrt\", count: 2});\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 2.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("typeOf([1, 2]);\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "array");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("typeOf(function (n) { return n; });\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "function");
+    value_free(result.value);
+    eval_result_free(&result);
+
     result = evaluate_source("[1, 2] == [1, 2];\n", &error);
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
@@ -404,6 +439,16 @@ void run_eval_tests(TestContext *ctx) {
     result = evaluate_source("let n = 3; n[0] = 1;\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
     EXPECT_TRUE(ctx, strstr(result.error_message, "index assignment requires an array or object value") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("len(3);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "len() expects a string, array, or object") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("print();\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "expected 1 arguments but got 0") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source(
@@ -717,7 +762,7 @@ void run_eval_tests(TestContext *ctx) {
         EXPECT_FALSE(ctx, result.had_error);
         EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
         EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 5.0);
-        EXPECT_SIZE_EQ(ctx, gc_live_function_count(), 0U);
+        EXPECT_SIZE_EQ(ctx, gc_live_function_count(), 3U);
         EXPECT_SIZE_EQ(ctx, gc_live_env_count(), 1U);
 
         value_free(result.value);
@@ -805,5 +850,6 @@ void run_eval_tests(TestContext *ctx) {
     assert_example_output(ctx, "examples/function_expressions.js", "11\n");
     assert_example_output(ctx, "examples/const.js", "7\n");
     assert_example_output(ctx, "examples/references.js", "5:9:7\n");
+    assert_example_output(ctx, "examples/builtins.js", "object:5:3\n");
     assert_example_output(ctx, "examples/gc_stress.js", "85\n");
 }

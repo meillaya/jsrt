@@ -20,6 +20,14 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 | Arrays | literals, indexing, equality by deep element comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
 | Objects | literals, dot/bracket access, equality by ordered key/value comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
 
+## Built-in library baseline
+
+| Built-in | Current behavior | Evidence |
+|---|---|---|
+| `print(value)` | writes the value's string form plus newline, returns `null` | `tests/test_eval.c`, `examples/builtins.js` |
+| `len(value)` | returns length/count for strings, arrays, and objects | `tests/test_eval.c`, `src/eval.c` |
+| `typeOf(value)` | returns stable runtime type labels | `tests/test_eval.c`, `src/eval.c` |
+
 ## Control flow baseline
 
 | Feature | Current behavior | Evidence |

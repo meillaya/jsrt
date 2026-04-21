@@ -15,9 +15,12 @@ typedef struct JsObject JsObject;
 
 typedef struct JsFunction {
     GcHeader gc;
+    bool is_native;
     const struct Stmt *declaration;
     const struct Expr *expression;
     Env *closure;
+    const char *native_name;
+    size_t native_arity;
 } JsFunction;
 
 typedef enum {

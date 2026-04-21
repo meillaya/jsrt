@@ -273,6 +273,9 @@ static char *value_to_string_internal(Value value, const ValueStringifyFrame *fr
         case VALUE_STRING:
             return jsrt_strdup(value.as.string);
         case VALUE_FUNCTION:
+            if (value.as.function != NULL && value.as.function->is_native && value.as.function->native_name != NULL) {
+                return jsrt_format("<builtin %s>", value.as.function->native_name);
+            }
             if (value.as.function != NULL && value.as.function->declaration != NULL &&
                 value.as.function->declaration->kind == STMT_FUNCTION) {
                 return jsrt_format("<function %s>", value.as.function->declaration->as.function.name);

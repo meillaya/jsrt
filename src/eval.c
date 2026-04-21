@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,6 +42,12 @@ typedef struct {
     size_t count;
     size_t capacity;
 } AssignPath;
+
+typedef enum {
+    BUILTIN_PRINT,
+    BUILTIN_LEN,
+    BUILTIN_TYPEOF
+} BuiltinKind;
 
 static EvalResult result_ok(Value value) {
     EvalResult result;
@@ -89,7 +96,38 @@ static bool ensure_number(Evaluator *evaluator, Value value, const Expr *expr, c
 static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr);
 static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt);
 
+static JsFunction *create_user_function(const Stmt *declaration, const Expr *expression, Env *closure) {
+    JsFunction *function = jsrt_malloc(sizeof(*function));
+    gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
+    function->is_native = false;
+    function->declaration = declaration;
+    function->expression = expression;
+    function->closure = closure;
+    function->native_name = NULL;
+    function->native_arity = 0U;
+    return function;
+}
+
+static JsFunction *create_native_function(const char *name, size_t arity, BuiltinKind kind) {
+    JsFunction *function = jsrt_malloc(sizeof(*function));
+    gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
+    function->is_native = true;
+    function->declaration = (const Stmt *)(size_t)(kind + 1);
+    function->expression = NULL;
+    function->closure = NULL;
+    function->native_name = name;
+    function->native_arity = arity;
+    return function;
+}
+
+static BuiltinKind js_native_kind(const JsFunction *function) {
+    return (BuiltinKind)((size_t)function->declaration - 1U);
+}
+
 static const char *js_function_name(const JsFunction *function) {
+    if (function->is_native) {
+        return function->native_name;
+    }
     if (function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
         return function->declaration->as.function.name;
     }
@@ -100,6 +138,9 @@ static const char *js_function_name(const JsFunction *function) {
 }
 
 static const StringArray *js_function_params(const JsFunction *function) {
+    if (function->is_native) {
+        return NULL;
+    }
     if (function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
         return &function->declaration->as.function.params;
     }
@@ -110,6 +151,9 @@ static const StringArray *js_function_params(const JsFunction *function) {
 }
 
 static const StmtArray *js_function_body(const JsFunction *function) {
+    if (function->is_native) {
+        return NULL;
+    }
     if (function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
         return &function->declaration->as.function.body;
     }
@@ -117,6 +161,70 @@ static const StmtArray *js_function_body(const JsFunction *function) {
         return &function->expression->as.function.body;
     }
     return NULL;
+}
+
+static const char *value_type_name(Value value) {
+    switch (value.type) {
+        case VALUE_NUMBER:
+            return "number";
+        case VALUE_BOOL:
+            return "bool";
+        case VALUE_NULL:
+            return "null";
+        case VALUE_STRING:
+            return "string";
+        case VALUE_FUNCTION:
+            return "function";
+        case VALUE_ARRAY:
+            return "array";
+        case VALUE_OBJECT:
+            return "object";
+    }
+    return "unknown";
+}
+
+static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, const JsFunction *function, Value *arguments) {
+    switch (js_native_kind(function)) {
+        case BUILTIN_PRINT: {
+            char *text = value_to_string(arguments[0]);
+            printf("%s\n", text);
+            free(text);
+            return result_ok(value_null());
+        }
+        case BUILTIN_LEN:
+            switch (arguments[0].type) {
+                case VALUE_STRING:
+                    return result_ok(value_number((double)strlen(arguments[0].as.string)));
+                case VALUE_ARRAY:
+                    return result_ok(value_number((double)arguments[0].as.array->count));
+                case VALUE_OBJECT:
+                    return result_ok(value_number((double)arguments[0].as.object->count));
+                default:
+                    return result_error_at(
+                        evaluator,
+                        expr->line,
+                        expr->column,
+                        1,
+                        "len() expects a string, array, or object"
+                    );
+            }
+        case BUILTIN_TYPEOF:
+            return result_ok(value_string(value_type_name(arguments[0])));
+    }
+
+    return result_error_at(evaluator, expr->line, expr->column, 1, "unsupported builtin function");
+}
+
+static void define_builtin(Env *env, const char *name, size_t arity, BuiltinKind kind) {
+    Value builtin = value_function(create_native_function(name, arity, kind));
+    env_define(env, name, builtin, true);
+    value_free(builtin);
+}
+
+static void define_global_builtins(Env *env) {
+    define_builtin(env, "print", 1U, BUILTIN_PRINT);
+    define_builtin(env, "len", 1U, BUILTIN_LEN);
+    define_builtin(env, "typeOf", 1U, BUILTIN_TYPEOF);
 }
 
 static EvalResult execute_switch(Evaluator *evaluator, const Stmt *stmt) {
@@ -550,6 +658,7 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
     const StmtArray *body;
     const char *function_name;
     Env *call_env;
+    const JsFunction *function;
 
     if (callee_result.had_error) {
         return callee_result;
@@ -559,22 +668,28 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
         return result_error_at(evaluator, expr->line, expr->column, 1, "attempted to call a non-function value");
     }
 
-    params = js_function_params(callee_result.value.as.function);
-    body = js_function_body(callee_result.value.as.function);
-    function_name = js_function_name(callee_result.value.as.function);
-    if (params == NULL || body == NULL) {
+    function = callee_result.value.as.function;
+    params = js_function_params(function);
+    body = js_function_body(function);
+    function_name = js_function_name(function);
+    if (!function->is_native && (params == NULL || body == NULL)) {
         value_free(callee_result.value);
         return result_error_at(evaluator, expr->line, expr->column, 1, "invalid function body");
     }
 
-    if (expr->as.call.arguments.count != params->count) {
+    if ((!function->is_native && expr->as.call.arguments.count != params->count) ||
+        (function->is_native && expr->as.call.arguments.count != function->native_arity)) {
         value_free(callee_result.value);
         return result_error_at_take(
             evaluator,
             expr->line,
             expr->column,
             1,
-            jsrt_format("expected %zu arguments but got %zu", params->count, expr->as.call.arguments.count)
+            jsrt_format(
+                "expected %zu arguments but got %zu",
+                function->is_native ? function->native_arity : params->count,
+                expr->as.call.arguments.count
+            )
         );
     }
 
@@ -601,7 +716,20 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
         gc_temp_root_push_value(&argument_roots[i], &arguments[i]);
     }
 
-    call_env = env_create(callee_result.value.as.function->closure);
+    if (function->is_native) {
+        result = call_native_function(evaluator, expr, function, arguments);
+        for (i = expr->as.call.arguments.count; i > 0; --i) {
+            gc_temp_root_pop(&argument_roots[i - 1U]);
+            value_free(arguments[i - 1U]);
+        }
+        free(argument_roots);
+        free(arguments);
+        gc_temp_root_pop(&callee_root);
+        value_free(callee_result.value);
+        return result;
+    }
+
+    call_env = env_create(function->closure);
     if (function_name != NULL) {
         env_define(call_env, function_name, callee_result.value, true);
     }
@@ -989,11 +1117,7 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
         case EXPR_CALL:
             return eval_call(evaluator, expr);
         case EXPR_FUNCTION: {
-            JsFunction *function = jsrt_malloc(sizeof(*function));
-            gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
-            function->declaration = NULL;
-            function->expression = expr;
-            function->closure = evaluator->env;
+            JsFunction *function = create_user_function(NULL, expr, evaluator->env);
             return result_ok(value_function(function));
         }
         case EXPR_ARRAY:
@@ -1205,11 +1329,7 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
             }
         }
         case STMT_FUNCTION: {
-            JsFunction *function = jsrt_malloc(sizeof(*function));
-            gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
-            function->declaration = stmt;
-            function->expression = NULL;
-            function->closure = evaluator->env;
+            JsFunction *function = create_user_function(stmt, NULL, evaluator->env);
             {
                 Value fn_value = value_function(function);
                 if (!env_define(evaluator->env, stmt->as.function.name, fn_value, true)) {
@@ -1271,6 +1391,7 @@ EvalResult eval_program(const StmtArray *program, const char *source, Env *env) 
     evaluator.active_envs = &active_scope;
     evaluator.loop_depth = 0;
     evaluator.switch_depth = 0;
+    define_global_builtins(env);
 
     for (i = 0; i < program->count; ++i) {
         value_free(result.value);
