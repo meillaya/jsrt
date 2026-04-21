@@ -225,6 +225,16 @@ It is designed to be execution-ready for later use by **Ralph** or **Team**, and
 - **Verification shape:** tree-walk vs VM parity suite; full example sweep; ASan/debug builds
 - **Risk level:** High
 
+### M9. VM surface widening I
+- **Horizon:** Mid-term
+- **Goal:** Extend the opt-in VM/backend subset to cover aggregates plus the remaining structured control-flow gaps before tackling closure/upvalue support.
+- **Key deliverables:** widened compiler lowering; aggregate VM opcodes; parity suite expansion; updated docs/examples
+- **Dependencies:** M8
+- **Recommended execution mode:** `team`
+- **Suggested primary lanes/roles:** `executor`, `debugger`, `test-engineer`, `verifier`
+- **Verification shape:** widened parity suite; backend-switch example run; ASan/debug builds
+- **Risk level:** High
+
 ## Long-term horizon
 
 ### L1. Benchmark and profiling harness

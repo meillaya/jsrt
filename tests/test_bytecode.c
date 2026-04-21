@@ -140,7 +140,7 @@ void run_bytecode_tests(TestContext *ctx) {
 
         EXPECT_FALSE(ctx, compile_source_text(source, &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "nested function declarations are deferred") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "closure capture is not supported") != NULL);
         free(error);
     }
 
@@ -151,18 +151,55 @@ void run_bytecode_tests(TestContext *ctx) {
 
         EXPECT_FALSE(ctx, compile_source_text(source, &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "function expressions are deferred") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "function expressions with VM parity remain deferred") != NULL);
         free(error);
     }
 
     {
-        const char *source = "let arr = [1, 2, 3];\n";
+        const char *source =
+            "let arr = [1, 2, 3];\n"
+            "let obj = {name: \"jsrt\", third: arr[2]};\n"
+            "arr[1] = 9;\n"
+            "obj.name;\n";
         BytecodeProgram program;
         char *error = NULL;
+        char *disassembly;
 
-        EXPECT_FALSE(ctx, compile_source_text(source, &program, &error));
-        EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "aggregate bytecode lowering is deferred") != NULL);
-        free(error);
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "MAKE_ARRAY") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "MAKE_OBJECT") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "GET_INDEX") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "SET_INDEX") != NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
+    }
+
+    {
+        const char *source =
+            "let total = 0;\n"
+            "do {\n"
+            "  total = total + 1;\n"
+            "} while (total < 3);\n"
+            "switch (total) {\n"
+            "  case 3:\n"
+            "    total = total + 4;\n"
+            "    break;\n"
+            "  default:\n"
+            "    total = 0;\n"
+            "}\n";
+        BytecodeProgram program;
+        char *error = NULL;
+        char *disassembly;
+
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "LOOP") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "JUMP_IF_FALSE") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "JUMP") != NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
     }
 }

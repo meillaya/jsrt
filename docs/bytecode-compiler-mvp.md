@@ -24,17 +24,21 @@ Included:
 - `if` / `else`
 - `while`
 - `for`
-- top-level function declarations (nested declarations remain deferred)
+- `do...while`
+- `switch`
+- `break` / `continue`
+- top-level and nested non-capturing function declarations
 - function calls
+- array literals
+- object literals
+- index/property access
+- property/index assignment
 - built-in calls as ordinary global loads/calls
 
 Deferred in M7:
 - function expressions
-- aggregate literals/access/mutation
 - closures/upvalues
-- `switch`
-- `do...while`
-- `break` / `continue`
+- capturing nested functions
 
 ## Testing shape
 

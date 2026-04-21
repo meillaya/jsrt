@@ -14,6 +14,25 @@ typedef struct {
     size_t slot;
 } Local;
 
+typedef struct {
+    int *items;
+    size_t count;
+    size_t capacity;
+} PatchList;
+
+typedef enum {
+    CONTROL_LOOP,
+    CONTROL_SWITCH
+} ControlKind;
+
+typedef struct ControlContext {
+    ControlKind kind;
+    int continue_target;
+    PatchList breaks;
+    PatchList continues;
+    struct ControlContext *previous;
+} ControlContext;
+
 typedef struct Compiler {
     BytecodeProgram *program;
     BytecodeFunction *function;
@@ -25,6 +44,7 @@ typedef struct Compiler {
     size_t next_slot;
     int scope_depth;
     bool is_script;
+    ControlContext *control;
 } Compiler;
 
 static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error_message);
@@ -43,6 +63,35 @@ static bool set_compile_error_take(const char *source, int line, int column, int
     bool ok = set_compile_error(source, line, column, width, message, error_message);
     free(message);
     return ok;
+}
+
+static void patch_list_init(PatchList *list) {
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static void patch_list_free(PatchList *list) {
+    free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static void patch_list_push(PatchList *list, int index) {
+    if (list->count == list->capacity) {
+        size_t new_capacity = list->capacity == 0 ? 4U : list->capacity * 2U;
+        list->items = jsrt_realloc(list->items, sizeof(*list->items) * new_capacity);
+        list->capacity = new_capacity;
+    }
+    list->items[list->count++] = index;
+}
+
+static void patch_list_apply(BytecodeFunction *function, const PatchList *list, int target) {
+    size_t i;
+    for (i = 0; i < list->count; ++i) {
+        function->instructions[(size_t)list->items[i]].operand = target;
+    }
 }
 
 static BytecodeFunction *add_function(BytecodeProgram *program, const char *name, size_t arity) {
@@ -139,7 +188,7 @@ static bool resolve_captured_name(const Compiler *compiler, const char *name) {
     return false;
 }
 
-static bool declare_local(Compiler *compiler, const char *name, char **error_message) {
+static bool declare_local(Compiler *compiler, const char *name, int line, int column, char **error_message) {
     size_t i = compiler->local_count;
     while (i > 0) {
         const Local *local;
@@ -149,12 +198,12 @@ static bool declare_local(Compiler *compiler, const char *name, char **error_mes
             break;
         }
         if (strcmp(local->name, name) == 0) {
-            return set_compile_error(
+            return set_compile_error_take(
                 compiler->source,
-                1,
-                1,
-                1,
-                "duplicate local in compiler scope",
+                line,
+                column,
+                (int)strlen(name),
+                jsrt_format("duplicate local '%s' in compiler scope", name),
                 error_message
             );
         }
@@ -187,7 +236,7 @@ static bool compile_identifier_load(Compiler *compiler, const char *name, int li
             line,
             column,
             (int)strlen(name),
-            jsrt_format("closure capture is not supported by the bytecode MVP ('%s')", name),
+            jsrt_format("closure capture is not supported by the VM surface widening milestone ('%s')", name),
             error_message
         );
     }
@@ -207,7 +256,7 @@ static bool compile_identifier_store(Compiler *compiler, const char *name, int l
             line,
             column,
             (int)strlen(name),
-            jsrt_format("closure capture is not supported by the bytecode MVP ('%s')", name),
+            jsrt_format("closure capture is not supported by the VM surface widening milestone ('%s')", name),
             error_message
         );
     }
@@ -225,7 +274,16 @@ static bool compile_statement_list(Compiler *compiler, const StmtArray *statemen
     return true;
 }
 
-static bool compile_function_body(Compiler *parent, const char *name, const StringArray *params, const StmtArray *body, int line, int column, char **error_message, int *out_index) {
+static bool compile_function_body(
+    Compiler *parent,
+    const char *name,
+    const StringArray *params,
+    const StmtArray *body,
+    int line,
+    int column,
+    char **error_message,
+    int *out_index
+) {
     Compiler child;
     BytecodeFunction *function = add_function(parent->program, name != NULL ? name : "<anonymous>", params->count);
     size_t i;
@@ -240,26 +298,12 @@ static bool compile_function_body(Compiler *parent, const char *name, const Stri
     child.next_slot = 0;
     child.scope_depth = 1;
     child.is_script = false;
+    child.control = NULL;
 
     for (i = 0; i < params->count; ++i) {
-        if (!declare_local(&child, params->items[i], error_message)) {
+        if (!declare_local(&child, params->items[i], line, column, error_message)) {
             free(child.locals);
             return false;
-        }
-    }
-
-    for (i = 0; i < body->count; ++i) {
-        const Stmt *stmt = body->items[i];
-        if (stmt->kind == STMT_FUNCTION) {
-            free(child.locals);
-            return set_compile_error(
-                parent->source,
-                stmt->line,
-                stmt->column,
-                1,
-                "nested function declarations are deferred in the bytecode MVP",
-                error_message
-            );
         }
     }
 
@@ -271,8 +315,6 @@ static bool compile_function_body(Compiler *parent, const char *name, const Stri
     emit_instruction(function, BC_RETURN, 0);
     free(child.locals);
     *out_index = (int)(parent->program->function_count - 1U);
-    (void)line;
-    (void)column;
     return true;
 }
 
@@ -309,7 +351,45 @@ static bool compile_logical(Compiler *compiler, const Expr *expr, char **error_m
     return set_compile_error(compiler->source, expr->line, expr->column, 2, "unsupported logical operator in compiler", error_message);
 }
 
+static bool assignment_root_is_identifier(const Expr *expr) {
+    switch (expr->kind) {
+        case EXPR_IDENTIFIER:
+            return true;
+        case EXPR_PROPERTY:
+            return assignment_root_is_identifier(expr->as.property.target);
+        case EXPR_INDEX:
+            return assignment_root_is_identifier(expr->as.index.target);
+        default:
+            return false;
+    }
+}
+
+static bool compile_assignment_target_container_and_key(Compiler *compiler, const Expr *target, char **error_message) {
+    switch (target->kind) {
+        case EXPR_PROPERTY:
+            if (!compile_expression(compiler, target->as.property.target, error_message)) {
+                return false;
+            }
+            emit_instruction(
+                compiler->function,
+                BC_CONST,
+                add_constant(compiler->function, value_string(target->as.property.name))
+            );
+            return true;
+        case EXPR_INDEX:
+            if (!compile_expression(compiler, target->as.index.target, error_message) ||
+                !compile_expression(compiler, target->as.index.index, error_message)) {
+                return false;
+            }
+            return true;
+        default:
+            return false;
+    }
+}
+
 static bool compile_expression(Compiler *compiler, const Expr *expr, char **error_message) {
+    size_t i;
+
     switch (expr->kind) {
         case EXPR_LITERAL:
             switch (expr->as.literal.kind) {
@@ -364,16 +444,23 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
         case EXPR_LOGICAL:
             return compile_logical(compiler, expr, error_message);
         case EXPR_ASSIGN:
-            if (expr->as.assign.target->kind != EXPR_IDENTIFIER) {
-                return set_compile_error(compiler->source, expr->line, expr->column, 1, "aggregate assignment is deferred in the bytecode MVP", error_message);
+            if (expr->as.assign.target->kind == EXPR_IDENTIFIER) {
+                if (!compile_expression(compiler, expr->as.assign.value, error_message)) {
+                    return false;
+                }
+                emit_instruction(compiler->function, BC_DUP, 0);
+                return compile_identifier_store(compiler, expr->as.assign.target->as.identifier.name, expr->line, expr->column, error_message);
             }
-            if (!compile_expression(compiler, expr->as.assign.value, error_message)) {
+            if (!assignment_root_is_identifier(expr->as.assign.target)) {
+                return set_compile_error(compiler->source, expr->line, expr->column, 1, "assignment target must start with a variable", error_message);
+            }
+            if (!compile_assignment_target_container_and_key(compiler, expr->as.assign.target, error_message) ||
+                !compile_expression(compiler, expr->as.assign.value, error_message)) {
                 return false;
             }
-            emit_instruction(compiler->function, BC_DUP, 0);
-            return compile_identifier_store(compiler, expr->as.assign.target->as.identifier.name, expr->line, expr->column, error_message);
-        case EXPR_CALL: {
-            size_t i;
+            emit_instruction(compiler->function, BC_SET_INDEX, 0);
+            return true;
+        case EXPR_CALL:
             if (!compile_expression(compiler, expr->as.call.callee, error_message)) {
                 return false;
             }
@@ -384,14 +471,47 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             }
             emit_instruction(compiler->function, BC_CALL, (int)expr->as.call.arguments.count);
             return true;
-        }
         case EXPR_FUNCTION:
-            return set_compile_error(compiler->source, expr->line, expr->column, 1, "function expressions are deferred in the bytecode MVP", error_message);
+            return set_compile_error(compiler->source, expr->line, expr->column, 1, "function expressions with VM parity remain deferred pending closure support", error_message);
         case EXPR_ARRAY:
+            for (i = 0; i < expr->as.array.elements.count; ++i) {
+                if (!compile_expression(compiler, expr->as.array.elements.items[i], error_message)) {
+                    return false;
+                }
+            }
+            emit_instruction(compiler->function, BC_MAKE_ARRAY, (int)expr->as.array.elements.count);
+            return true;
         case EXPR_OBJECT:
+            for (i = 0; i < expr->as.object.properties.count; ++i) {
+                emit_instruction(
+                    compiler->function,
+                    BC_CONST,
+                    add_constant(compiler->function, value_string(expr->as.object.properties.items[i].key))
+                );
+                if (!compile_expression(compiler, expr->as.object.properties.items[i].value, error_message)) {
+                    return false;
+                }
+            }
+            emit_instruction(compiler->function, BC_MAKE_OBJECT, (int)expr->as.object.properties.count);
+            return true;
         case EXPR_INDEX:
+            if (!compile_expression(compiler, expr->as.index.target, error_message) ||
+                !compile_expression(compiler, expr->as.index.index, error_message)) {
+                return false;
+            }
+            emit_instruction(compiler->function, BC_GET_INDEX, 0);
+            return true;
         case EXPR_PROPERTY:
-            return set_compile_error(compiler->source, expr->line, expr->column, 1, "aggregate bytecode lowering is deferred in the bytecode MVP", error_message);
+            if (!compile_expression(compiler, expr->as.property.target, error_message)) {
+                return false;
+            }
+            emit_instruction(
+                compiler->function,
+                BC_CONST,
+                add_constant(compiler->function, value_string(expr->as.property.name))
+            );
+            emit_instruction(compiler->function, BC_GET_INDEX, 0);
+            return true;
     }
 
     return set_compile_error(compiler->source, expr->line, expr->column, 1, "unsupported expression in compiler", error_message);
@@ -411,11 +531,26 @@ static bool compile_variable_declaration(Compiler *compiler, const Stmt *stmt, c
         return true;
     }
 
-    if (!declare_local(compiler, stmt->as.var.name, error_message)) {
+    if (!declare_local(compiler, stmt->as.var.name, stmt->line, stmt->column, error_message)) {
         return false;
     }
     emit_instruction(compiler->function, BC_STORE_LOCAL, (int)(compiler->locals[compiler->local_count - 1U].slot));
     return true;
+}
+
+static ControlContext *find_breakable_control(Compiler *compiler) {
+    return compiler->control;
+}
+
+static ControlContext *find_loop_control(Compiler *compiler) {
+    ControlContext *current = compiler->control;
+    while (current != NULL) {
+        if (current->kind == CONTROL_LOOP) {
+            return current;
+        }
+        current = current->previous;
+    }
+    return NULL;
 }
 
 static bool compile_if_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
@@ -446,27 +581,106 @@ static bool compile_if_statement(Compiler *compiler, const Stmt *stmt, char **er
 static bool compile_while_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
     int loop_start = (int)compiler->function->instruction_count;
     int exit_jump;
+    int end_label;
+    ControlContext loop_context;
+
+    patch_list_init(&loop_context.breaks);
+    patch_list_init(&loop_context.continues);
+    loop_context.kind = CONTROL_LOOP;
+    loop_context.continue_target = loop_start;
+    loop_context.previous = compiler->control;
+    compiler->control = &loop_context;
+
     if (!compile_expression(compiler, stmt->as.while_stmt.condition, error_message)) {
+        compiler->control = loop_context.previous;
+        patch_list_free(&loop_context.breaks);
+        patch_list_free(&loop_context.continues);
         return false;
     }
     exit_jump = emit_instruction(compiler->function, BC_JUMP_IF_FALSE, -1);
     emit_instruction(compiler->function, BC_POP, 0);
     if (!compile_statement(compiler, stmt->as.while_stmt.body, error_message)) {
+        compiler->control = loop_context.previous;
+        patch_list_free(&loop_context.breaks);
+        patch_list_free(&loop_context.continues);
         return false;
     }
+    patch_list_apply(compiler->function, &loop_context.continues, loop_start);
     emit_instruction(compiler->function, BC_LOOP, loop_start);
     patch_instruction(compiler->function, exit_jump, (int)compiler->function->instruction_count);
     emit_instruction(compiler->function, BC_POP, 0);
+    end_label = (int)compiler->function->instruction_count;
+    patch_list_apply(compiler->function, &loop_context.breaks, end_label);
+    compiler->control = loop_context.previous;
+    patch_list_free(&loop_context.breaks);
+    patch_list_free(&loop_context.continues);
+    return true;
+}
+
+static bool compile_do_while_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
+    int loop_start = (int)compiler->function->instruction_count;
+    int condition_start;
+    int exit_jump;
+    int end_label;
+    ControlContext loop_context;
+
+    patch_list_init(&loop_context.breaks);
+    patch_list_init(&loop_context.continues);
+    loop_context.kind = CONTROL_LOOP;
+    loop_context.continue_target = -1;
+    loop_context.previous = compiler->control;
+    compiler->control = &loop_context;
+
+    if (!compile_statement(compiler, stmt->as.do_while_stmt.body, error_message)) {
+        compiler->control = loop_context.previous;
+        patch_list_free(&loop_context.breaks);
+        patch_list_free(&loop_context.continues);
+        return false;
+    }
+
+    condition_start = (int)compiler->function->instruction_count;
+    patch_list_apply(compiler->function, &loop_context.continues, condition_start);
+    if (!compile_expression(compiler, stmt->as.do_while_stmt.condition, error_message)) {
+        compiler->control = loop_context.previous;
+        patch_list_free(&loop_context.breaks);
+        patch_list_free(&loop_context.continues);
+        return false;
+    }
+    exit_jump = emit_instruction(compiler->function, BC_JUMP_IF_FALSE, -1);
+    emit_instruction(compiler->function, BC_POP, 0);
+    emit_instruction(compiler->function, BC_LOOP, loop_start);
+    patch_instruction(compiler->function, exit_jump, (int)compiler->function->instruction_count);
+    emit_instruction(compiler->function, BC_POP, 0);
+    end_label = (int)compiler->function->instruction_count;
+    patch_list_apply(compiler->function, &loop_context.breaks, end_label);
+    compiler->control = loop_context.previous;
+    patch_list_free(&loop_context.breaks);
+    patch_list_free(&loop_context.continues);
     return true;
 }
 
 static bool compile_for_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
     int loop_start;
     int exit_jump = -1;
+    int increment_start;
+    int continue_target;
+    int end_label;
+    ControlContext loop_context;
+
+    patch_list_init(&loop_context.breaks);
+    patch_list_init(&loop_context.continues);
+    loop_context.kind = CONTROL_LOOP;
+    loop_context.continue_target = -1;
+    loop_context.previous = compiler->control;
+    compiler->control = &loop_context;
 
     compiler_begin_scope(compiler);
     if (stmt->as.for_stmt.init != NULL) {
         if (!compile_statement(compiler, stmt->as.for_stmt.init, error_message)) {
+            compiler->control = loop_context.previous;
+            compiler_end_scope(compiler);
+            patch_list_free(&loop_context.breaks);
+            patch_list_free(&loop_context.continues);
             return false;
         }
     }
@@ -474,6 +688,10 @@ static bool compile_for_statement(Compiler *compiler, const Stmt *stmt, char **e
     loop_start = (int)compiler->function->instruction_count;
     if (stmt->as.for_stmt.condition != NULL) {
         if (!compile_expression(compiler, stmt->as.for_stmt.condition, error_message)) {
+            compiler->control = loop_context.previous;
+            compiler_end_scope(compiler);
+            patch_list_free(&loop_context.breaks);
+            patch_list_free(&loop_context.continues);
             return false;
         }
         exit_jump = emit_instruction(compiler->function, BC_JUMP_IF_FALSE, -1);
@@ -481,11 +699,23 @@ static bool compile_for_statement(Compiler *compiler, const Stmt *stmt, char **e
     }
 
     if (!compile_statement(compiler, stmt->as.for_stmt.body, error_message)) {
+        compiler->control = loop_context.previous;
+        compiler_end_scope(compiler);
+        patch_list_free(&loop_context.breaks);
+        patch_list_free(&loop_context.continues);
         return false;
     }
 
+    increment_start = (int)compiler->function->instruction_count;
+    continue_target = stmt->as.for_stmt.increment != NULL ? increment_start : loop_start;
+    patch_list_apply(compiler->function, &loop_context.continues, continue_target);
+
     if (stmt->as.for_stmt.increment != NULL) {
         if (!compile_expression(compiler, stmt->as.for_stmt.increment, error_message)) {
+            compiler->control = loop_context.previous;
+            compiler_end_scope(compiler);
+            patch_list_free(&loop_context.breaks);
+            patch_list_free(&loop_context.continues);
             return false;
         }
         emit_instruction(compiler->function, BC_POP, 0);
@@ -496,8 +726,103 @@ static bool compile_for_statement(Compiler *compiler, const Stmt *stmt, char **e
         patch_instruction(compiler->function, exit_jump, (int)compiler->function->instruction_count);
         emit_instruction(compiler->function, BC_POP, 0);
     }
+    end_label = (int)compiler->function->instruction_count;
+    patch_list_apply(compiler->function, &loop_context.breaks, end_label);
     compiler_end_scope(compiler);
+    compiler->control = loop_context.previous;
+    patch_list_free(&loop_context.breaks);
+    patch_list_free(&loop_context.continues);
     return true;
+}
+
+static bool compile_switch_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
+    size_t case_count = stmt->as.switch_stmt.cases.count;
+    int *body_jumps = jsrt_malloc(sizeof(*body_jumps) * case_count);
+    int default_fallthrough = -1;
+    int end_pop_label;
+    int end_label;
+    size_t i, j;
+    ControlContext switch_context;
+
+    for (i = 0; i < case_count; ++i) {
+        body_jumps[i] = -1;
+    }
+
+    patch_list_init(&switch_context.breaks);
+    patch_list_init(&switch_context.continues);
+    switch_context.kind = CONTROL_SWITCH;
+    switch_context.continue_target = -1;
+    switch_context.previous = compiler->control;
+    compiler->control = &switch_context;
+
+    if (!compile_expression(compiler, stmt->as.switch_stmt.expression, error_message)) {
+        goto fail;
+    }
+
+    for (i = 0; i < case_count; ++i) {
+        const SwitchCase *switch_case = &stmt->as.switch_stmt.cases.items[i];
+        int false_jump;
+        if (switch_case->is_default) {
+            continue;
+        }
+        emit_instruction(compiler->function, BC_DUP, 0);
+        if (!compile_expression(compiler, switch_case->value, error_message)) {
+            goto fail;
+        }
+        emit_instruction(compiler->function, BC_EQ, 0);
+        false_jump = emit_instruction(compiler->function, BC_JUMP_IF_FALSE, -1);
+        emit_instruction(compiler->function, BC_POP, 0);
+        body_jumps[i] = emit_instruction(compiler->function, BC_JUMP, -1);
+        patch_instruction(compiler->function, false_jump, (int)compiler->function->instruction_count);
+        emit_instruction(compiler->function, BC_POP, 0);
+    }
+
+    default_fallthrough = emit_instruction(compiler->function, BC_JUMP, -1);
+
+    for (i = 0; i < case_count; ++i) {
+        const SwitchCase *switch_case = &stmt->as.switch_stmt.cases.items[i];
+        if (switch_case->is_default) {
+            patch_instruction(compiler->function, default_fallthrough, (int)compiler->function->instruction_count);
+        } else {
+            patch_instruction(compiler->function, body_jumps[i], (int)compiler->function->instruction_count);
+        }
+        for (j = 0; j < switch_case->statements.count; ++j) {
+            if (!compile_statement(compiler, switch_case->statements.items[j], error_message)) {
+                goto fail;
+            }
+        }
+    }
+
+    if (default_fallthrough >= 0 && case_count > 0U) {
+        bool has_default = false;
+        for (i = 0; i < case_count; ++i) {
+            if (stmt->as.switch_stmt.cases.items[i].is_default) {
+                has_default = true;
+                break;
+            }
+        }
+        if (!has_default) {
+            patch_instruction(compiler->function, default_fallthrough, (int)compiler->function->instruction_count);
+        }
+    }
+
+    end_pop_label = (int)compiler->function->instruction_count;
+    patch_list_apply(compiler->function, &switch_context.breaks, end_pop_label);
+    emit_instruction(compiler->function, BC_POP, 0);
+    end_label = (int)compiler->function->instruction_count;
+    (void)end_label;
+    compiler->control = switch_context.previous;
+    patch_list_free(&switch_context.breaks);
+    patch_list_free(&switch_context.continues);
+    free(body_jumps);
+    return true;
+
+fail:
+    compiler->control = switch_context.previous;
+    patch_list_free(&switch_context.breaks);
+    patch_list_free(&switch_context.continues);
+    free(body_jumps);
+    return false;
 }
 
 static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
@@ -519,10 +844,14 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
             return true;
         case STMT_IF:
             return compile_if_statement(compiler, stmt, error_message);
-        case STMT_WHILE:
-            return compile_while_statement(compiler, stmt, error_message);
+        case STMT_DO_WHILE:
+            return compile_do_while_statement(compiler, stmt, error_message);
         case STMT_FOR:
             return compile_for_statement(compiler, stmt, error_message);
+        case STMT_WHILE:
+            return compile_while_statement(compiler, stmt, error_message);
+        case STMT_SWITCH:
+            return compile_switch_statement(compiler, stmt, error_message);
         case STMT_FUNCTION: {
             int function_index;
             if (!compile_function_body(
@@ -541,7 +870,7 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
                 emit_instruction(compiler->function, BC_DEFINE_GLOBAL, add_global_symbol(compiler->program, stmt->as.function.name));
                 return true;
             }
-            if (!declare_local(compiler, stmt->as.function.name, error_message)) {
+            if (!declare_local(compiler, stmt->as.function.name, stmt->line, stmt->column, error_message)) {
                 return false;
             }
             emit_instruction(compiler->function, BC_STORE_LOCAL, (int)(compiler->locals[compiler->local_count - 1U].slot));
@@ -557,14 +886,22 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
             }
             emit_instruction(compiler->function, BC_RETURN, 0);
             return true;
-        case STMT_DO_WHILE:
-            return set_compile_error(compiler->source, stmt->line, stmt->column, 2, "do...while is deferred in the bytecode MVP", error_message);
-        case STMT_SWITCH:
-            return set_compile_error(compiler->source, stmt->line, stmt->column, 6, "switch is deferred in the bytecode MVP", error_message);
-        case STMT_BREAK:
-            return set_compile_error(compiler->source, stmt->line, stmt->column, 5, "break is deferred in the bytecode MVP", error_message);
-        case STMT_CONTINUE:
-            return set_compile_error(compiler->source, stmt->line, stmt->column, 8, "continue is deferred in the bytecode MVP", error_message);
+        case STMT_BREAK: {
+            ControlContext *target = find_breakable_control(compiler);
+            if (target == NULL) {
+                return set_compile_error(compiler->source, stmt->line, stmt->column, 5, "break is only valid inside a loop or switch", error_message);
+            }
+            patch_list_push(&target->breaks, emit_instruction(compiler->function, BC_JUMP, -1));
+            return true;
+        }
+        case STMT_CONTINUE: {
+            ControlContext *target = find_loop_control(compiler);
+            if (target == NULL) {
+                return set_compile_error(compiler->source, stmt->line, stmt->column, 8, "continue is only valid inside a loop", error_message);
+            }
+            patch_list_push(&target->continues, emit_instruction(compiler->function, BC_JUMP, -1));
+            return true;
+        }
     }
 
     return set_compile_error(compiler->source, stmt->line, stmt->column, 1, "unsupported statement in compiler", error_message);
@@ -591,6 +928,7 @@ bool compile_program(const StmtArray *program, const char *source, BytecodeProgr
     compiler.next_slot = 0;
     compiler.scope_depth = 0;
     compiler.is_script = true;
+    compiler.control = NULL;
 
     for (i = 0; i < program->count; ++i) {
         const Stmt *stmt = program->items[i];

@@ -143,13 +143,61 @@ void run_vm_tests(TestContext *ctx) {
         "for (let i = 0; i < 3; i = i + 1) { value = bump(value); }\n"
         "value;\n"
     );
+    assert_backend_parity(
+        ctx,
+        "let values = [1, 2, 3, 4];\n"
+        "let meta = {name: \"jsrt\", third: values[2], nested: {label: \"runtime\"}};\n"
+        "meta.name + \":\" + meta.third + \":\" + meta.nested.label;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let arr = [1, 2, 3];\n"
+        "let obj = {name: \"old\", nested: {value: arr[0]}};\n"
+        "arr[2] = 7;\n"
+        "obj.name = \"new\";\n"
+        "obj[\"nested\"].value = arr[2];\n"
+        "arr[0] + \":\" + obj.name + \":\" + obj.nested.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let out = 0;\n"
+        "switch (2) {\n"
+        "  case 1:\n"
+        "    out = 1;\n"
+        "    break;\n"
+        "  case 2:\n"
+        "    out = out + 2;\n"
+        "  case 3:\n"
+        "    out = out + 3;\n"
+        "    break;\n"
+        "  default:\n"
+        "    out = 99;\n"
+        "}\n"
+        "out;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let i = 0;\n"
+        "let total = 0;\n"
+        "do {\n"
+        "  i = i + 1;\n"
+        "  if (i == 2) { continue; }\n"
+        "  total = total + i;\n"
+        "} while (i < 4);\n"
+        "total;\n"
+    );
 
     {
         char *error = NULL;
-        EvalResult result = eval_vm_source("let arr = [1, 2, 3];\n", &error);
+        EvalResult result = eval_vm_source(
+            "let makeAdder = function (base) {\n"
+            "  return function (n) { return base + n; };\n"
+            "};\n",
+            &error
+        );
         EXPECT_TRUE(ctx, result.had_error);
         EXPECT_TRUE(ctx, result.error_message != NULL);
-        EXPECT_TRUE(ctx, strstr(result.error_message, "aggregate bytecode lowering is deferred") != NULL);
+        EXPECT_TRUE(ctx, strstr(result.error_message, "function expressions with VM parity remain deferred") != NULL);
         eval_result_free(&result);
     }
 
@@ -162,6 +210,19 @@ void run_vm_tests(TestContext *ctx) {
         if (file != NULL) {
             EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
             EXPECT_STRING_EQ(ctx, buffer, "number:5:12\n");
+            fclose(file);
+        }
+    }
+
+    {
+        FILE *file;
+        char buffer[128];
+        EXPECT_INT_EQ(ctx, system("JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js > build/vm-surface.out"), 0);
+        file = fopen("build/vm-surface.out", "r");
+        EXPECT_TRUE(ctx, file != NULL);
+        if (file != NULL) {
+            EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
+            EXPECT_STRING_EQ(ctx, buffer, "1:new:8:7\n");
             fclose(file);
         }
     }

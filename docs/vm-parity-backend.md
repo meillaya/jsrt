@@ -21,16 +21,20 @@ Included:
 - `if` / `else`
 - `while`
 - `for`
-- top-level function declarations and non-capturing calls
+- `do...while`
+- `switch`
+- `break` / `continue`
+- top-level and nested non-capturing function declarations/calls
 - built-ins `print`, `len`, `typeOf`
+- array literals
+- object literals
+- index/property access
+- property/index assignment
 
 Still deferred:
 - closures/upvalues
 - function expressions
-- aggregate lowering/parity
-- `switch`
-- `do...while`
-- `break` / `continue`
+- capturing nested functions
 
 ## CLI switch
 

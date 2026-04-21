@@ -32,6 +32,10 @@ typedef enum {
     BC_JUMP,
     BC_JUMP_IF_FALSE,
     BC_LOOP,
+    BC_MAKE_ARRAY,
+    BC_MAKE_OBJECT,
+    BC_GET_INDEX,
+    BC_SET_INDEX,
     BC_CALL,
     BC_MAKE_FUNCTION,
     BC_RETURN

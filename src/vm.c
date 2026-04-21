@@ -1,5 +1,6 @@
 #include "jsrt/vm.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -219,6 +220,54 @@ static EvalResult vm_call_native(const Vm *vm, const JsFunction *function, Value
             return vm_result_ok(value_string(vm_value_type_name(arguments[0])));
     }
     return vm_runtime_error(vm, RUNTIME_ERROR_INTERNAL, "unsupported builtin function");
+}
+
+static JsArray *vm_create_array(size_t count) {
+    JsArray *array = jsrt_malloc(sizeof(*array));
+    size_t i;
+    gc_register_object(&array->gc, GC_OBJECT_ARRAY);
+    array->count = count;
+    array->items = jsrt_malloc(sizeof(*array->items) * count);
+    for (i = 0; i < count; ++i) {
+        array->items[i] = value_null();
+    }
+    return array;
+}
+
+static JsObject *vm_create_object(size_t count) {
+    JsObject *object = jsrt_malloc(sizeof(*object));
+    size_t i;
+    gc_register_object(&object->gc, GC_OBJECT_OBJECT);
+    object->count = count;
+    object->items = jsrt_malloc(sizeof(*object->items) * count);
+    for (i = 0; i < count; ++i) {
+        object->items[i].key = NULL;
+        object->items[i].value = value_null();
+    }
+    return object;
+}
+
+static ptrdiff_t vm_object_find_key(const JsObject *object, const char *key) {
+    size_t i;
+    for (i = 0; i < object->count; ++i) {
+        if (strcmp(object->items[i].key, key) == 0) {
+            return (ptrdiff_t)i;
+        }
+    }
+    return -1;
+}
+
+static void vm_object_set_key(JsObject *object, const char *key, Value value) {
+    ptrdiff_t existing = vm_object_find_key(object, key);
+    if (existing >= 0) {
+        value_free(object->items[(size_t)existing].value);
+        object->items[(size_t)existing].value = value_clone(value);
+        return;
+    }
+    object->items = jsrt_realloc(object->items, sizeof(*object->items) * (object->count + 1U));
+    object->items[object->count].key = jsrt_strdup(key);
+    object->items[object->count].value = value_clone(value);
+    object->count += 1U;
 }
 
 static void vm_define_builtin(Env *env, const char *name, size_t arity, VmBuiltinKind kind) {
@@ -460,6 +509,136 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             case BC_LOOP:
                 frame->ip = (size_t)instruction->operand;
                 break;
+            case BC_MAKE_ARRAY: {
+                size_t count = (size_t)instruction->operand;
+                JsArray *array = vm_create_array(count);
+                size_t i;
+                for (i = count; i > 0; --i) {
+                    array->items[i - 1U] = vm_pop(&vm);
+                }
+                vm_push(&vm, value_array_take(array));
+                break;
+            }
+            case BC_MAKE_OBJECT: {
+                size_t count = (size_t)instruction->operand;
+                JsObject *object = vm_create_object(count);
+                size_t i;
+                for (i = count; i > 0; --i) {
+                    Value value = vm_pop(&vm);
+                    Value key = vm_pop(&vm);
+                    if (key.type != VALUE_STRING) {
+                        value_free(value);
+                        value_free(key);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "object literal key must be a string");
+                        goto cleanup;
+                    }
+                    object->items[i - 1U].key = jsrt_strdup(key.as.string);
+                    object->items[i - 1U].value = value;
+                    value_free(key);
+                }
+                vm_push(&vm, value_object_take(object));
+                break;
+            }
+            case BC_GET_INDEX: {
+                Value key = vm_pop(&vm);
+                Value target = vm_pop(&vm);
+                if (target.type == VALUE_ARRAY) {
+                    size_t index;
+                    Value result_value;
+                    if (key.type != VALUE_NUMBER) {
+                        value_free(target);
+                        value_free(key);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "array indexing expects a numeric index");
+                        goto cleanup;
+                    }
+                    index = (size_t)key.as.number;
+                    if ((double)index != key.as.number || index >= target.as.array->count) {
+                        value_free(target);
+                        value_free(key);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_INDEX, "array index out of bounds");
+                        goto cleanup;
+                    }
+                    result_value = value_clone(target.as.array->items[index]);
+                    value_free(target);
+                    value_free(key);
+                    vm_push(&vm, result_value);
+                    break;
+                }
+                if (target.type == VALUE_OBJECT) {
+                    ptrdiff_t idx;
+                    Value result_value;
+                    if (key.type != VALUE_STRING) {
+                        value_free(target);
+                        value_free(key);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "object indexing expects a string key");
+                        goto cleanup;
+                    }
+                    idx = vm_object_find_key(target.as.object, key.as.string);
+                    if (idx < 0) {
+                        value_free(target);
+                        result = vm_runtime_error_take(&vm, RUNTIME_ERROR_LOOKUP, jsrt_format("object key '%s' not found", key.as.string));
+                        value_free(key);
+                        goto cleanup;
+                    }
+                    result_value = value_clone(target.as.object->items[(size_t)idx].value);
+                    value_free(target);
+                    value_free(key);
+                    vm_push(&vm, result_value);
+                    break;
+                }
+                value_free(target);
+                value_free(key);
+                result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "indexing requires an array or object value");
+                goto cleanup;
+            }
+            case BC_SET_INDEX: {
+                Value value = vm_pop(&vm);
+                Value key = vm_pop(&vm);
+                Value target = vm_pop(&vm);
+                if (target.type == VALUE_ARRAY) {
+                    size_t index;
+                    if (key.type != VALUE_NUMBER) {
+                        value_free(target);
+                        value_free(key);
+                        value_free(value);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "array assignment expects a numeric index");
+                        goto cleanup;
+                    }
+                    index = (size_t)key.as.number;
+                    if ((double)index != key.as.number || index >= target.as.array->count) {
+                        value_free(target);
+                        value_free(key);
+                        value_free(value);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_INDEX, "array assignment index out of bounds");
+                        goto cleanup;
+                    }
+                    value_free(target.as.array->items[index]);
+                    target.as.array->items[index] = value_clone(value);
+                    value_free(target);
+                    value_free(key);
+                    vm_push(&vm, value);
+                    break;
+                }
+                if (target.type == VALUE_OBJECT) {
+                    if (key.type != VALUE_STRING) {
+                        value_free(target);
+                        value_free(key);
+                        value_free(value);
+                        result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "object assignment expects a string key");
+                        goto cleanup;
+                    }
+                    vm_object_set_key(target.as.object, key.as.string, value);
+                    value_free(target);
+                    value_free(key);
+                    vm_push(&vm, value);
+                    break;
+                }
+                value_free(target);
+                value_free(key);
+                value_free(value);
+                result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "index assignment requires an array or object value");
+                goto cleanup;
+            }
             case BC_CALL: {
                 size_t argc = (size_t)instruction->operand;
                 size_t callee_index;

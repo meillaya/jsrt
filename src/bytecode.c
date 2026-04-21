@@ -33,6 +33,10 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_JUMP: return "JUMP";
         case BC_JUMP_IF_FALSE: return "JUMP_IF_FALSE";
         case BC_LOOP: return "LOOP";
+        case BC_MAKE_ARRAY: return "MAKE_ARRAY";
+        case BC_MAKE_OBJECT: return "MAKE_OBJECT";
+        case BC_GET_INDEX: return "GET_INDEX";
+        case BC_SET_INDEX: return "SET_INDEX";
         case BC_CALL: return "CALL";
         case BC_MAKE_FUNCTION: return "MAKE_FUNCTION";
         case BC_RETURN: return "RETURN";
@@ -115,6 +119,8 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
         case BC_JUMP:
         case BC_JUMP_IF_FALSE:
         case BC_LOOP:
+        case BC_MAKE_ARRAY:
+        case BC_MAKE_OBJECT:
             return jsrt_format("%04zu %-14s %d\n", index, name, instruction->operand);
         case BC_MAKE_FUNCTION:
             return jsrt_format(

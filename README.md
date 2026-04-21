@@ -11,6 +11,7 @@ The interpreter currently supports:
 - tree-walk evaluator
 - bytecode compiler/disassembler MVP for a bounded subset
 - opt-in VM parity backend for that bounded subset
+- widened opt-in VM surface for aggregates and structured control flow
 - variables
 - arithmetic and comparison operators
 - string literals and string concatenation with `+`
@@ -89,6 +90,7 @@ make test
 ./build/jsrt examples/references.js
 ./build/jsrt examples/builtins.js
 JSRT_BACKEND=vm ./build/jsrt examples/vm_subset.js
+JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js
 ```
 
 ## Repository layout
@@ -117,18 +119,18 @@ Current baseline/process artifacts live in:
 
 ## Current roadmap focus
 
-The active runtime milestone is **M8 — VM interpreter parity backend**. Its execution contract lives in:
-- `.omx/plans/prd-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+The active runtime milestone is **M9 — VM surface widening I**. Its execution contract lives in:
+- `.omx/plans/prd-javascript-runtime-roadmap-m9-vm-surface-widening-i.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m9-vm-surface-widening-i.md`
 - `docs/vm-parity-backend.md`
 
-M8 stays intentionally bounded:
-1. execute the M7 bytecode subset on a stack VM
-2. prove parity against tree-walk on representative programs
-3. keep the VM opt-in while tree-walk remains semantic authority
-4. leave unsupported backend surface explicit instead of pretending full parity exists
+M9 stays intentionally bounded:
+1. widen VM/compiler support for aggregates and deferred structured control flow
+2. keep closure/upvalue cases explicit and still unsupported
+3. prove parity against tree-walk on the widened subset
+4. keep the VM opt-in while tree-walk remains semantic authority
 
-Likely follow-ons after M8:
-1. future backend expansion only after bounded parity evidence exists
-2. closure/upvalue work only if later milestones explicitly widen the backend subset
+Likely follow-ons after M9:
+1. closure/upvalue work only if later milestones explicitly widen the backend subset again
+2. future backend expansion only after bounded parity evidence exists
 3. performance/benchmark work once backend scope stabilizes
