@@ -1,0 +1,7 @@
+build/
+build-asan/
+.omx/*
+!.omx/plans/
+!.omx/plans/**
+!.omx/specs/
+!.omx/specs/**
