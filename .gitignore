@@ -5,3 +5,4 @@ build-asan/
 !.omx/plans/**
 !.omx/specs/
 !.omx/specs/**
+.omx/
