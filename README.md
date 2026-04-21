@@ -9,6 +9,7 @@ The interpreter currently supports:
 - recursive-descent parser
 - explicit AST
 - tree-walk evaluator
+- bytecode compiler/disassembler MVP for a bounded subset
 - variables
 - arithmetic and comparison operators
 - string literals and string concatenation with `+`
@@ -107,24 +108,24 @@ Current baseline/process artifacts live in:
 - `docs/diagnostics-golden-harness.md`
 - `docs/built-in-library-foundation.md`
 - `docs/bytecode-ir-architecture-spike.md`
+- `docs/bytecode-compiler-mvp.md`
 - `docs/gc-observability-and-stress.md`
 - `docs/runtime-error-model.md`
 
 ## Current roadmap focus
 
-The active runtime milestone is **M6 — bytecode / IR architecture spike**. Its execution contract lives in:
-- `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md`
-- `.omx/plans/prd-javascript-runtime-roadmap-m6-bytecode-ir-architecture-spike.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m6-bytecode-ir-architecture-spike.md`
-- `docs/bytecode-ir-architecture-spike.md`
+The active runtime milestone is **M7 — bytecode compiler MVP**. Its execution contract lives in:
+- `.omx/plans/prd-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
+- `docs/bytecode-compiler-mvp.md`
 
-M6 stays intentionally design-heavy:
-1. choose the backend direction before implementation
-2. define a draft instruction set and compiler boundary
-3. define the first parity subset and explicit deferrals
-4. decide whether M7/M8 proceed and under what guardrails
+M7 stays intentionally bounded:
+1. compile a bytecode subset without executing it yet
+2. provide stable disassembly for compiler-focused tests
+3. reject deferred backend features explicitly instead of miscompiling them
+4. keep tree-walk evaluation as the only executing backend until M8
 
-Likely follow-ons after M6:
-1. M7 — bytecode compiler MVP for the bounded subset
-2. M8 — VM interpreter parity backend for the bounded subset
-3. future backend expansion only after bounded parity evidence exists
+Likely follow-ons after M7:
+1. M8 — VM interpreter parity backend for the bounded subset
+2. future backend expansion only after bounded parity evidence exists
+3. closure/upvalue work only if later milestones explicitly widen the backend subset

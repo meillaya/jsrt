@@ -5,9 +5,9 @@ OBJ_DIR := $(BUILD_DIR)/obj
 BIN := $(BUILD_DIR)/jsrt
 TEST_BIN := $(BUILD_DIR)/test_jsrt
 
-SRC := src/main.c src/memory.c src/diagnostics.c src/lexer.c src/ast.c src/parser.c src/value.c src/env.c src/gc.c src/eval.c
-LIB_SRC := src/memory.c src/diagnostics.c src/lexer.c src/ast.c src/parser.c src/value.c src/env.c src/gc.c src/eval.c
-TEST_SRC := tests/test_runner.c tests/test_lexer.c tests/test_parser.c tests/test_eval.c tests/test_diagnostics.c
+SRC := src/main.c src/memory.c src/diagnostics.c src/lexer.c src/ast.c src/parser.c src/value.c src/env.c src/gc.c src/eval.c src/bytecode.c src/compiler.c
+LIB_SRC := src/memory.c src/diagnostics.c src/lexer.c src/ast.c src/parser.c src/value.c src/env.c src/gc.c src/eval.c src/bytecode.c src/compiler.c
+TEST_SRC := tests/test_runner.c tests/test_lexer.c tests/test_parser.c tests/test_eval.c tests/test_diagnostics.c tests/test_bytecode.c
 
 OBJ := $(SRC:src/%.c=$(OBJ_DIR)/src/%.o)
 TEST_OBJ := $(LIB_SRC:src/%.c=$(OBJ_DIR)/src/%.o) $(TEST_SRC:tests/%.c=$(OBJ_DIR)/tests/%.o)

@@ -70,5 +70,6 @@ void run_lexer_tests(TestContext *ctx);
 void run_parser_tests(TestContext *ctx);
 void run_eval_tests(TestContext *ctx);
 void run_diagnostics_tests(TestContext *ctx);
+void run_bytecode_tests(TestContext *ctx);
 
 #endif
