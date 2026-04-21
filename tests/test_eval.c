@@ -321,7 +321,73 @@ void run_eval_tests(TestContext *ctx) {
     );
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
-    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1.0);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 99.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let obj = {nested: {value: 1}};\n"
+        "let alias = obj.nested;\n"
+        "alias.value = 7;\n"
+        "obj.nested.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 7.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function bump(items) {\n"
+        "  items[0] = items[0] + 4;\n"
+        "}\n"
+        "let values = [1, 2];\n"
+        "bump(values);\n"
+        "values[0];\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 5.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function identity(value) { return value; }\n"
+        "let values = [1, 2];\n"
+        "let alias = identity(values);\n"
+        "alias[1] = 9;\n"
+        "values[1];\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 9.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let obj = {};\n"
+        "obj.self = obj;\n"
+        "obj == obj;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let obj = {};\n"
+        "obj.self = obj;\n"
+        "\"cycle:\" + obj;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "cycle:{self: <cycle>}");
     value_free(result.value);
     eval_result_free(&result);
 
@@ -503,7 +569,7 @@ void run_eval_tests(TestContext *ctx) {
     );
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
-    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 4.0);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 14.0);
     value_free(result.value);
     eval_result_free(&result);
 
@@ -738,5 +804,6 @@ void run_eval_tests(TestContext *ctx) {
     assert_example_output(ctx, "examples/switch.js", "5\n");
     assert_example_output(ctx, "examples/function_expressions.js", "11\n");
     assert_example_output(ctx, "examples/const.js", "7\n");
+    assert_example_output(ctx, "examples/references.js", "5:9:7\n");
     assert_example_output(ctx, "examples/gc_stress.js", "85\n");
 }

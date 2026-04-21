@@ -41,14 +41,15 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 
 ## Aggregate semantics baseline
 
-- Arrays and objects are **copied on environment read/write boundaries**.
-- Updating an array/object binding does **not** mutate previously copied aliases.
+- Arrays and objects preserve **shared identity** across environment read/write boundaries.
+- Updating an array/object binding, property, or index **does** mutate every alias that points at the same aggregate.
 - Property assignment may create a missing object key on the final write step.
 - Array assignment is in-bounds only.
-- Internally, arrays/objects may now live on the bounded managed heap, but that does **not** change the externally visible copy-isolated semantics above.
+- Function argument passing and returns preserve aggregate identity instead of de-aliasing arrays/objects.
+- Self-referential arrays/objects can now arise through assignment; stringification and equality remain cycle-safe instead of recursing forever.
 
 Evidence:
-- `tests/test_eval.c` covers alias isolation, nested assignment, property creation, and array assignment bounds.
+- `tests/test_eval.c` covers alias-visible mutation, nested assignment, function-call/reference flow, property creation, cycle-safe output/equality, and array assignment bounds.
 
 ## Parser / diagnostics baseline
 
@@ -65,8 +66,6 @@ Evidence:
 
 These are not part of the current baseline:
 
-- `switch`
-- `do...while`
 - modules / imports / exports
 - classes / prototypes / `this` / `new`
 - async / event loop behavior

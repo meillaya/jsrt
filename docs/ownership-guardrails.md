@@ -38,18 +38,18 @@ Still outside GC scope:
 | Object | managed-heap aggregate traced through reachable env/value roots |
 
 Important current rule:
-- `value_clone` deep-copies strings, arrays, and objects.
-- `value_clone` preserves function identity instead of deep-copying functions.
+- `value_clone` deep-copies strings.
+- `value_clone` preserves function, array, and object identity instead of deep-copying managed aggregates.
 
 ## Environment ownership
 
 - `Env` instances form lexical parent chains.
-- `env_define` and `env_assign` store cloned values rather than adopting caller-owned values directly.
-- `env_get` returns a cloned value to the caller.
+- `env_define` and `env_assign` still store cloned strings/scalars, but preserve array/object identity.
+- `env_get` still returns an owned `Value`, but arrays/objects keep shared identity instead of being deep-copied.
 - `env_destroy` releases the caller's explicit handle; actual reclamation happens on the next collector pass.
 
 Consequence:
-- environment reads/writes are a major reason array/object aliasing is copy-isolated today.
+- environment reads/writes no longer isolate array/object aliases; aggregate mutation is shared intentionally.
 
 ## Closure / GC interaction
 
@@ -95,9 +95,8 @@ Normal execution currently cleans up in this order:
 ## What later milestones must not assume
 
 Later work must not assume:
-- arrays/objects behave like shared JS references,
 - all runtime heap objects are GC-managed,
-- environment mutation can safely bypass cloning,
+- environment mutation can safely bypass the existing `Value` ownership conventions,
 - VM/backend work can ignore current ownership invariants.
 
 If any milestone changes one of those assumptions, it should update this document and add matching regression evidence.

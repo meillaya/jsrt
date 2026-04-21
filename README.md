@@ -14,7 +14,7 @@ The interpreter currently supports:
 - string literals and string concatenation with `+`
 - array literals and indexing
 - object literals with dot / bracket access
-- property and index assignment with explicit copy-on-write-ish binding semantics
+- property and index assignment with shared-reference aggregate semantics
 - `for` loops plus `break` / `continue`
 - `do...while` loops
 - `switch` / `case` / `default` with JS/C-style fallthrough
@@ -46,8 +46,8 @@ jsrt uses explicit ownership rules instead of a garbage collector:
 - `StmtArray` / AST nodes own all nested expressions, statements, parameter names, identifier strings, array elements, and object literal properties; release them with `stmt_array_free` / `stmt_destroy`.
 - `Env` values form live lexical scope chains; function values retain the environment where they were declared.
 - Function bindings can create reference cycles, so a small tracing collector reclaims unreachable closure/environment graphs at safe execution points and final cleanup.
-- Arrays and objects are copied on environment read/write boundaries to keep milestone semantics simple and explicit.
-- Property/index assignment mutates the current binding's aggregate value; copied aliases remain independent by design.
+- Arrays and objects preserve shared identity across environment reads/writes, property access, index access, function arguments, and returns.
+- Property/index assignment mutates the shared aggregate, so aliases observe the same updates by design.
 - `EvalResult.value` is owned by the caller and must be released with `value_free`.
 
 ## Build
@@ -83,6 +83,7 @@ make test
 ./build/jsrt examples/switch.js
 ./build/jsrt examples/function_expressions.js
 ./build/jsrt examples/const.js
+./build/jsrt examples/references.js
 ```
 
 ## Repository layout
@@ -106,24 +107,18 @@ Current baseline/process artifacts live in:
 
 ## Current roadmap focus
 
-The active runtime milestone is **M2 — aggregate semantics ADR (`copy` vs `reference`)**. Its execution contract lives in:
+The active runtime milestone is **M3 — mutable aggregate/reference model implementation**. Its execution contract lives in:
 - `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md`
-- `.omx/plans/prd-javascript-runtime-roadmap-m2-aggregate-semantics-adr.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m2-aggregate-semantics-adr.md`
-- `docs/aggregate-semantics-adr.md`
+- `.omx/plans/prd-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
 
-M2 builds on the completed M1 observability work and stays intentionally design-heavy:
-1. compare current copy-isolated aggregate behavior against a shared-reference direction
-2. record the concrete breakage/compatibility map before any runtime rewrite starts
-3. define adoption, abort, and rollback criteria for M3
-4. decide whether M3 is required, deferred, or cancelled
+M3 implements the M2 decision while staying intentionally bounded:
+1. stop cloning arrays/objects across environment boundaries
+2. make alias-visible mutation work through bindings, nested access, function arguments, and returns
+3. keep strings/scalars unchanged and keep GC scope bounded
+4. harden cyclic aggregate stringification/equality enough to stay safe
 
-M2's chosen direction is:
-1. arrays/objects should move toward shared-reference semantics
-2. current runtime behavior remains unchanged until M3 implements that migration
-3. equality stays intentionally deferred beyond the minimum aggregate-identity decision
-
-Likely follow-ons after M2:
-1. M3 — mutable aggregate/reference model implementation
-2. M4 — built-in library foundation on the clarified aggregate model
-3. M6 — backend/IR planning on the cleaner heap model
+Likely follow-ons after M3:
+1. M4 — built-in library foundation on the clarified aggregate model
+2. M6 — backend/IR planning on the cleaner heap model
+3. M5 — runtime error model cleanup as the runtime surface grows

@@ -10,10 +10,21 @@
 #include "jsrt/gc.h"
 #include "jsrt/memory.h"
 
-static JsArray *array_clone(const JsArray *array);
-static JsObject *object_clone(const JsObject *object);
 static void array_mark_reachable(JsArray *array);
 static void object_mark_reachable(JsObject *object);
+typedef struct ValueStringifyFrame {
+    const void *aggregate;
+    const struct ValueStringifyFrame *previous;
+} ValueStringifyFrame;
+typedef struct ValueEqualityFrame {
+    const void *left;
+    const void *right;
+    const struct ValueEqualityFrame *previous;
+} ValueEqualityFrame;
+static char *value_to_string_internal(Value value, const ValueStringifyFrame *frames);
+static bool value_equals_internal(Value left, Value right, const ValueEqualityFrame *frames);
+static bool stringify_frame_contains(const ValueStringifyFrame *frames, const void *aggregate);
+static bool equality_frame_contains(const ValueEqualityFrame *frames, const void *left, const void *right);
 
 Value value_number(double number) {
     Value value;
@@ -82,11 +93,9 @@ Value value_clone(Value value) {
         case VALUE_STRING:
             return value_string(value.as.string);
         case VALUE_FUNCTION:
-            return value;
         case VALUE_ARRAY:
-            return value_array_take(array_clone(value.as.array));
         case VALUE_OBJECT:
-            return value_object_take(object_clone(value.as.object));
+            return value;
     }
     return value_null();
 }
@@ -109,36 +118,83 @@ bool value_is_truthy(Value value) {
     return false;
 }
 
-static bool array_equals(const JsArray *left, const JsArray *right) {
+static bool stringify_frame_contains(const ValueStringifyFrame *frames, const void *aggregate) {
+    while (frames != NULL) {
+        if (frames->aggregate == aggregate) {
+            return true;
+        }
+        frames = frames->previous;
+    }
+    return false;
+}
+
+static bool equality_frame_contains(const ValueEqualityFrame *frames, const void *left, const void *right) {
+    while (frames != NULL) {
+        if (frames->left == left && frames->right == right) {
+            return true;
+        }
+        frames = frames->previous;
+    }
+    return false;
+}
+
+static bool array_equals_internal(const JsArray *left, const JsArray *right, const ValueEqualityFrame *frames) {
     size_t i;
+
+    if (left == right) {
+        return true;
+    }
+    if (left == NULL || right == NULL) {
+        return left == right;
+    }
     if (left->count != right->count) {
         return false;
     }
-    for (i = 0; i < left->count; ++i) {
-        if (!value_equals(left->items[i], right->items[i])) {
-            return false;
+    if (equality_frame_contains(frames, left, right)) {
+        return true;
+    }
+
+    {
+        ValueEqualityFrame frame = {left, right, frames};
+        for (i = 0; i < left->count; ++i) {
+            if (!value_equals_internal(left->items[i], right->items[i], &frame)) {
+                return false;
+            }
         }
     }
     return true;
 }
 
-static bool object_equals(const JsObject *left, const JsObject *right) {
+static bool object_equals_internal(const JsObject *left, const JsObject *right, const ValueEqualityFrame *frames) {
     size_t i;
+
+    if (left == right) {
+        return true;
+    }
+    if (left == NULL || right == NULL) {
+        return left == right;
+    }
     if (left->count != right->count) {
         return false;
     }
-    for (i = 0; i < left->count; ++i) {
-        if (strcmp(left->items[i].key, right->items[i].key) != 0) {
-            return false;
-        }
-        if (!value_equals(left->items[i].value, right->items[i].value)) {
-            return false;
+    if (equality_frame_contains(frames, left, right)) {
+        return true;
+    }
+    {
+        ValueEqualityFrame frame = {left, right, frames};
+        for (i = 0; i < left->count; ++i) {
+            if (strcmp(left->items[i].key, right->items[i].key) != 0) {
+                return false;
+            }
+            if (!value_equals_internal(left->items[i].value, right->items[i].value, &frame)) {
+                return false;
+            }
         }
     }
     return true;
 }
 
-bool value_equals(Value left, Value right) {
+static bool value_equals_internal(Value left, Value right, const ValueEqualityFrame *frames) {
     if (left.type != right.type) {
         return false;
     }
@@ -155,11 +211,15 @@ bool value_equals(Value left, Value right) {
         case VALUE_FUNCTION:
             return left.as.function == right.as.function;
         case VALUE_ARRAY:
-            return array_equals(left.as.array, right.as.array);
+            return array_equals_internal(left.as.array, right.as.array, frames);
         case VALUE_OBJECT:
-            return object_equals(left.as.object, right.as.object);
+            return object_equals_internal(left.as.object, right.as.object, frames);
     }
     return false;
+}
+
+bool value_equals(Value left, Value right) {
+    return value_equals_internal(left, right, NULL);
 }
 
 static char *join_strings(char *prefix, const char *suffix) {
@@ -168,11 +228,12 @@ static char *join_strings(char *prefix, const char *suffix) {
     return joined;
 }
 
-static char *array_to_string(const JsArray *array) {
+static char *array_to_string(const JsArray *array, const ValueStringifyFrame *frames) {
     size_t i;
     char *result = jsrt_strdup("[");
+    ValueStringifyFrame frame = {array, frames};
     for (i = 0; i < array->count; ++i) {
-        char *item = value_to_string(array->items[i]);
+        char *item = value_to_string_internal(array->items[i], &frame);
         if (i > 0) {
             result = join_strings(result, ", ");
         }
@@ -183,11 +244,12 @@ static char *array_to_string(const JsArray *array) {
     return result;
 }
 
-static char *object_to_string(const JsObject *object) {
+static char *object_to_string(const JsObject *object, const ValueStringifyFrame *frames) {
     size_t i;
     char *result = jsrt_strdup("{");
+    ValueStringifyFrame frame = {object, frames};
     for (i = 0; i < object->count; ++i) {
-        char *value_text = value_to_string(object->items[i].value);
+        char *value_text = value_to_string_internal(object->items[i].value, &frame);
         char *pair = jsrt_format("%s: %s", object->items[i].key, value_text);
         if (i > 0) {
             result = join_strings(result, ", ");
@@ -200,7 +262,7 @@ static char *object_to_string(const JsObject *object) {
     return result;
 }
 
-char *value_to_string(Value value) {
+static char *value_to_string_internal(Value value, const ValueStringifyFrame *frames) {
     switch (value.type) {
         case VALUE_NUMBER:
             return jsrt_format("%.15g", value.as.number);
@@ -221,40 +283,25 @@ char *value_to_string(Value value) {
             }
             return jsrt_strdup("<function>");
         case VALUE_ARRAY:
-            return array_to_string(value.as.array);
+            if (stringify_frame_contains(frames, value.as.array)) {
+                return jsrt_strdup("<cycle>");
+            }
+            return array_to_string(value.as.array, frames);
         case VALUE_OBJECT:
-            return object_to_string(value.as.object);
+            if (stringify_frame_contains(frames, value.as.object)) {
+                return jsrt_strdup("<cycle>");
+            }
+            return object_to_string(value.as.object, frames);
     }
     return jsrt_strdup("<unknown>");
 }
 
+char *value_to_string(Value value) {
+    return value_to_string_internal(value, NULL);
+}
+
 void value_retain(Value value) {
     (void)value;
-}
-
-static JsArray *array_clone(const JsArray *array) {
-    size_t i;
-    JsArray *clone = jsrt_malloc(sizeof(*clone));
-    gc_register_object(&clone->gc, GC_OBJECT_ARRAY);
-    clone->count = array->count;
-    clone->items = jsrt_malloc(sizeof(*clone->items) * array->count);
-    for (i = 0; i < array->count; ++i) {
-        clone->items[i] = value_clone(array->items[i]);
-    }
-    return clone;
-}
-
-static JsObject *object_clone(const JsObject *object) {
-    size_t i;
-    JsObject *clone = jsrt_malloc(sizeof(*clone));
-    gc_register_object(&clone->gc, GC_OBJECT_OBJECT);
-    clone->count = object->count;
-    clone->items = jsrt_malloc(sizeof(*clone->items) * object->count);
-    for (i = 0; i < object->count; ++i) {
-        clone->items[i].key = jsrt_strdup(object->items[i].key);
-        clone->items[i].value = value_clone(object->items[i].value);
-    }
-    return clone;
 }
 
 static void array_mark_reachable(JsArray *array) {
