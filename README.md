@@ -106,23 +106,25 @@ Current baseline/process artifacts live in:
 - `docs/milestone-verification-checklist.md`
 - `docs/diagnostics-golden-harness.md`
 - `docs/built-in-library-foundation.md`
+- `docs/bytecode-ir-architecture-spike.md`
 - `docs/gc-observability-and-stress.md`
 - `docs/runtime-error-model.md`
 
 ## Current roadmap focus
 
-The active runtime milestone is **M5 — exceptionless structured runtime error model**. Its execution contract lives in:
-- `.omx/plans/prd-javascript-runtime-roadmap-m5-structured-runtime-error-model.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m5-structured-runtime-error-model.md`
-- `docs/runtime-error-model.md`
+The active runtime milestone is **M6 — bytecode / IR architecture spike**. Its execution contract lives in:
+- `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md`
+- `.omx/plans/prd-javascript-runtime-roadmap-m6-bytecode-ir-architecture-spike.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m6-bytecode-ir-architecture-spike.md`
+- `docs/bytecode-ir-architecture-spike.md`
 
-M5 stays intentionally bounded:
-1. add structured runtime error metadata to `EvalResult`
-2. normalize runtime diagnostics with explicit categories
-3. keep the model exceptionless and source-based
-4. avoid changing parser/lexer diagnostics or adding recovery semantics
+M6 stays intentionally design-heavy:
+1. choose the backend direction before implementation
+2. define a draft instruction set and compiler boundary
+3. define the first parity subset and explicit deferrals
+4. decide whether M7/M8 proceed and under what guardrails
 
-Likely follow-ons after M5:
-1. M6 — backend/IR planning on the cleaner heap model
-2. future built-in expansion only if later milestones explicitly require it
-3. targeted runtime ergonomics only when justified by later surface growth
+Likely follow-ons after M6:
+1. M7 — bytecode compiler MVP for the bounded subset
+2. M8 — VM interpreter parity backend for the bounded subset
+3. future backend expansion only after bounded parity evidence exists
