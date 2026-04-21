@@ -56,8 +56,38 @@ static EvalResult result_ok(Value value) {
     result.is_break = false;
     result.is_continue = false;
     result.value = value;
+    result.runtime_error_kind = RUNTIME_ERROR_NONE;
+    result.error_line = 0;
+    result.error_column = 0;
+    result.error_width = 0;
     result.error_message = NULL;
     return result;
+}
+
+static const char *runtime_error_kind_name(RuntimeErrorKind kind) {
+    switch (kind) {
+        case RUNTIME_ERROR_NONE:
+            return "none";
+        case RUNTIME_ERROR_TYPE:
+            return "type";
+        case RUNTIME_ERROR_NAME:
+            return "name";
+        case RUNTIME_ERROR_ARITY:
+            return "arity";
+        case RUNTIME_ERROR_LOOKUP:
+            return "lookup";
+        case RUNTIME_ERROR_ASSIGNMENT:
+            return "assignment";
+        case RUNTIME_ERROR_CONTROL_FLOW:
+            return "control-flow";
+        case RUNTIME_ERROR_INDEX:
+            return "index";
+        case RUNTIME_ERROR_MATH:
+            return "math";
+        case RUNTIME_ERROR_INTERNAL:
+            return "internal";
+    }
+    return "unknown";
 }
 
 static EvalResult result_error(char *message) {
@@ -67,12 +97,36 @@ static EvalResult result_error(char *message) {
     return result;
 }
 
-static EvalResult result_error_at(Evaluator *evaluator, int line, int column, int width, const char *message) {
-    return result_error(format_source_diagnostic("Runtime error", evaluator->source, line, column, width, message));
+static EvalResult result_runtime_error_at(
+    Evaluator *evaluator,
+    RuntimeErrorKind kind,
+    int line,
+    int column,
+    int width,
+    const char *message
+) {
+    EvalResult result;
+    char *label = jsrt_format("Runtime error [%s]", runtime_error_kind_name(kind));
+    char *diagnostic = format_source_diagnostic(label, evaluator->source, line, column, width, message);
+
+    free(label);
+    result = result_error(diagnostic);
+    result.runtime_error_kind = kind;
+    result.error_line = line;
+    result.error_column = column;
+    result.error_width = width;
+    return result;
 }
 
-static EvalResult result_error_at_take(Evaluator *evaluator, int line, int column, int width, char *message) {
-    EvalResult result = result_error_at(evaluator, line, column, width, message);
+static EvalResult result_runtime_error_at_take(
+    Evaluator *evaluator,
+    RuntimeErrorKind kind,
+    int line,
+    int column,
+    int width,
+    char *message
+) {
+    EvalResult result = result_runtime_error_at(evaluator, kind, line, column, width, message);
     free(message);
     return result;
 }
@@ -83,11 +137,15 @@ void eval_result_free(EvalResult *result) {
     }
     free(result->error_message);
     result->error_message = NULL;
+    result->runtime_error_kind = RUNTIME_ERROR_NONE;
+    result->error_line = 0;
+    result->error_column = 0;
+    result->error_width = 0;
 }
 
 static bool ensure_number(Evaluator *evaluator, Value value, const Expr *expr, const char *context, EvalResult *out_error) {
     if (value.type != VALUE_NUMBER) {
-        *out_error = result_error_at(evaluator, expr->line, expr->column, 1, context);
+        *out_error = result_runtime_error_at(evaluator, RUNTIME_ERROR_TYPE, expr->line, expr->column, 1, context);
         return false;
     }
     return true;
@@ -200,8 +258,9 @@ static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, c
                 case VALUE_OBJECT:
                     return result_ok(value_number((double)arguments[0].as.object->count));
                 default:
-                    return result_error_at(
+                    return result_runtime_error_at(
                         evaluator,
+                        RUNTIME_ERROR_TYPE,
                         expr->line,
                         expr->column,
                         1,
@@ -212,7 +271,7 @@ static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, c
             return result_ok(value_string(value_type_name(arguments[0])));
     }
 
-    return result_error_at(evaluator, expr->line, expr->column, 1, "unsupported builtin function");
+    return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported builtin function");
 }
 
 static void define_builtin(Env *env, const char *name, size_t arity, BuiltinKind kind) {
@@ -395,7 +454,14 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
             if (current->type != VALUE_OBJECT) {
                 gc_temp_root_pop(&assigned_value_root);
                 gc_temp_root_pop(&root_value_root);
-                return result_error_at(evaluator, step->line, step->column, 1, "property assignment requires an object value");
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    step->line,
+                    step->column,
+                    1,
+                    "property assignment requires an object value"
+                );
             }
 
             key_index = object_find_key(current->as.object, step->property_name);
@@ -408,8 +474,9 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
             if (key_index < 0) {
                 gc_temp_root_pop(&assigned_value_root);
                 gc_temp_root_pop(&root_value_root);
-                return result_error_at_take(
+                return result_runtime_error_at_take(
                     evaluator,
+                    RUNTIME_ERROR_LOOKUP,
                     step->line,
                     step->column,
                     1,
@@ -434,14 +501,28 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
                     gc_temp_root_pop(&root_value_root);
-                    return result_error_at(evaluator, step->line, step->column, 1, "array assignment expects a numeric index");
+                    return result_runtime_error_at(
+                        evaluator,
+                        RUNTIME_ERROR_TYPE,
+                        step->line,
+                        step->column,
+                        1,
+                        "array assignment expects a numeric index"
+                    );
                 }
                 index = (size_t)index_result.value.as.number;
                 if ((double)index != index_result.value.as.number || index >= current->as.array->count) {
                     value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
                     gc_temp_root_pop(&root_value_root);
-                    return result_error_at(evaluator, step->line, step->column, 1, "array assignment index out of bounds");
+                    return result_runtime_error_at(
+                        evaluator,
+                        RUNTIME_ERROR_INDEX,
+                        step->line,
+                        step->column,
+                        1,
+                        "array assignment index out of bounds"
+                    );
                 }
                 value_free(index_result.value);
                 if (is_last) {
@@ -461,7 +542,14 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
                     gc_temp_root_pop(&root_value_root);
-                    return result_error_at(evaluator, step->line, step->column, 1, "object assignment expects a string key");
+                    return result_runtime_error_at(
+                        evaluator,
+                        RUNTIME_ERROR_TYPE,
+                        step->line,
+                        step->column,
+                        1,
+                        "object assignment expects a string key"
+                    );
                 }
                 key_index = object_find_key(current->as.object, index_result.value.as.string);
                 if (is_last) {
@@ -476,7 +564,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
                     gc_temp_root_pop(&root_value_root);
-                    return result_error_at_take(evaluator, step->line, step->column, 1, message);
+                    return result_runtime_error_at_take(evaluator, RUNTIME_ERROR_LOOKUP, step->line, step->column, 1, message);
                 }
                 value_free(index_result.value);
                 current = &current->as.object->items[key_index].value;
@@ -486,13 +574,20 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
             value_free(index_result.value);
             gc_temp_root_pop(&assigned_value_root);
             gc_temp_root_pop(&root_value_root);
-            return result_error_at(evaluator, step->line, step->column, 1, "index assignment requires an array or object value");
+            return result_runtime_error_at(
+                evaluator,
+                RUNTIME_ERROR_TYPE,
+                step->line,
+                step->column,
+                1,
+                "index assignment requires an array or object value"
+            );
         }
     }
 
     gc_temp_root_pop(&assigned_value_root);
     gc_temp_root_pop(&root_value_root);
-    return result_error_at(evaluator, 1, 1, 1, "invalid assignment path");
+    return result_runtime_error_at(evaluator, RUNTIME_ERROR_ASSIGNMENT, 1, 1, 1, "invalid assignment path");
 }
 
 static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
@@ -511,16 +606,18 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
             }
             value_free(value_result.value);
             if (assign_result == ENV_ASSIGN_CONST) {
-                return result_error_at_take(
+                return result_runtime_error_at_take(
                     evaluator,
+                    RUNTIME_ERROR_ASSIGNMENT,
                     expr->as.assign.target->line,
                     expr->as.assign.target->column,
                     (int)strlen(name),
                     jsrt_format("cannot assign to const variable '%s'", name)
                 );
             }
-            return result_error_at_take(
+            return result_runtime_error_at_take(
                 evaluator,
+                RUNTIME_ERROR_NAME,
                 expr->as.assign.target->line,
                 expr->as.assign.target->column,
                 (int)strlen(name),
@@ -540,13 +637,21 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
         if (!build_assign_path(expr->as.assign.target, &path) || path.root_name == NULL) {
             assign_path_free(&path);
             value_free(value_result.value);
-            return result_error_at(evaluator, expr->line, expr->column, 1, "assignment target must start with a variable");
+            return result_runtime_error_at(
+                evaluator,
+                RUNTIME_ERROR_ASSIGNMENT,
+                expr->line,
+                expr->column,
+                1,
+                "assignment target must start with a variable"
+            );
         }
         if (!env_get(evaluator->env, path.root_name, &root_value)) {
             assign_path_free(&path);
             value_free(value_result.value);
-            return result_error_at_take(
+            return result_runtime_error_at_take(
                 evaluator,
+                RUNTIME_ERROR_NAME,
                 expr->as.assign.target->line,
                 expr->as.assign.target->column,
                 (int)strlen(path.root_name),
@@ -576,16 +681,18 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
             value_free(root_value);
             value_free(value_result.value);
             if (assign_root == ENV_ASSIGN_CONST) {
-                return result_error_at_take(
+                return result_runtime_error_at_take(
                     evaluator,
+                    RUNTIME_ERROR_ASSIGNMENT,
                     expr->as.assign.target->line,
                     expr->as.assign.target->column,
                     (int)strlen(path.root_name),
                     jsrt_format("cannot assign to const variable '%s'", path.root_name)
                 );
             }
-            return result_error_at_take(
+            return result_runtime_error_at_take(
                 evaluator,
+                RUNTIME_ERROR_NAME,
                 expr->as.assign.target->line,
                 expr->as.assign.target->column,
                 (int)strlen(path.root_name),
@@ -665,7 +772,14 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
     }
     if (callee_result.value.type != VALUE_FUNCTION || callee_result.value.as.function == NULL) {
         value_free(callee_result.value);
-        return result_error_at(evaluator, expr->line, expr->column, 1, "attempted to call a non-function value");
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            expr->line,
+            expr->column,
+            1,
+            "attempted to call a non-function value"
+        );
     }
 
     function = callee_result.value.as.function;
@@ -674,14 +788,15 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
     function_name = js_function_name(function);
     if (!function->is_native && (params == NULL || body == NULL)) {
         value_free(callee_result.value);
-        return result_error_at(evaluator, expr->line, expr->column, 1, "invalid function body");
+        return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "invalid function body");
     }
 
     if ((!function->is_native && expr->as.call.arguments.count != params->count) ||
         (function->is_native && expr->as.call.arguments.count != function->native_arity)) {
         value_free(callee_result.value);
-        return result_error_at_take(
+        return result_runtime_error_at_take(
             evaluator,
+            RUNTIME_ERROR_ARITY,
             expr->line,
             expr->column,
             1,
@@ -807,7 +922,7 @@ static EvalResult eval_logical(Evaluator *evaluator, const Expr *expr) {
         }
     } else {
         value_free(left.value);
-        return result_error_at(evaluator, expr->line, expr->column, 2, "unsupported logical operator");
+        return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 2, "unsupported logical operator");
     }
 
     value_free(left.value);
@@ -893,13 +1008,20 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
         if (index.value.type != VALUE_NUMBER) {
             value_free(target.value);
             value_free(index.value);
-            return result_error_at(evaluator, expr->line, expr->column, 1, "array indexing expects a numeric index");
+            return result_runtime_error_at(
+                evaluator,
+                RUNTIME_ERROR_TYPE,
+                expr->line,
+                expr->column,
+                1,
+                "array indexing expects a numeric index"
+            );
         }
         i = (size_t)index.value.as.number;
         if ((double)i != index.value.as.number || i >= target.value.as.array->count) {
             value_free(target.value);
             value_free(index.value);
-            return result_error_at(evaluator, expr->line, expr->column, 1, "array index out of bounds");
+            return result_runtime_error_at(evaluator, RUNTIME_ERROR_INDEX, expr->line, expr->column, 1, "array index out of bounds");
         }
         {
             Value result = value_clone(target.value.as.array->items[i]);
@@ -913,7 +1035,14 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
         if (index.value.type != VALUE_STRING) {
             value_free(target.value);
             value_free(index.value);
-            return result_error_at(evaluator, expr->line, expr->column, 1, "object indexing expects a string key");
+            return result_runtime_error_at(
+                evaluator,
+                RUNTIME_ERROR_TYPE,
+                expr->line,
+                expr->column,
+                1,
+                "object indexing expects a string key"
+            );
         }
         for (i = 0; i < target.value.as.object->count; ++i) {
             if (strcmp(target.value.as.object->items[i].key, index.value.as.string) == 0) {
@@ -925,12 +1054,31 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
         }
         value_free(target.value);
         value_free(index.value);
-        return result_error_at_take(evaluator, expr->line, expr->column, 1, jsrt_format("object key '%s' not found", expr->as.index.index->kind == EXPR_LITERAL && expr->as.index.index->as.literal.kind == LITERAL_STRING ? expr->as.index.index->as.literal.string : "?"));
+        return result_runtime_error_at_take(
+            evaluator,
+            RUNTIME_ERROR_LOOKUP,
+            expr->line,
+            expr->column,
+            1,
+            jsrt_format(
+                "object key '%s' not found",
+                expr->as.index.index->kind == EXPR_LITERAL && expr->as.index.index->as.literal.kind == LITERAL_STRING
+                    ? expr->as.index.index->as.literal.string
+                    : "?"
+            )
+        );
     }
 
     value_free(target.value);
     value_free(index.value);
-    return result_error_at(evaluator, expr->line, expr->column, 1, "indexing requires an array or object value");
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        expr->line,
+        expr->column,
+        1,
+        "indexing requires an array or object value"
+    );
 }
 
 static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
@@ -941,7 +1089,14 @@ static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
     }
     if (target.value.type != VALUE_OBJECT) {
         value_free(target.value);
-        return result_error_at(evaluator, expr->line, expr->column, 1, "property access requires an object value");
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            expr->line,
+            expr->column,
+            1,
+            "property access requires an object value"
+        );
     }
     for (i = 0; i < target.value.as.object->count; ++i) {
         if (strcmp(target.value.as.object->items[i].key, expr->as.property.name) == 0) {
@@ -951,7 +1106,14 @@ static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
         }
     }
     value_free(target.value);
-    return result_error_at_take(evaluator, expr->line, expr->column, 1, jsrt_format("object key '%s' not found", expr->as.property.name));
+    return result_runtime_error_at_take(
+        evaluator,
+        RUNTIME_ERROR_LOOKUP,
+        expr->line,
+        expr->column,
+        1,
+        jsrt_format("object key '%s' not found", expr->as.property.name)
+    );
 }
 
 static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
@@ -971,8 +1133,9 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
         case EXPR_IDENTIFIER: {
             Value value;
             if (!env_get(evaluator->env, expr->as.identifier.name, &value)) {
-                return result_error_at_take(
+                return result_runtime_error_at_take(
                     evaluator,
+                    RUNTIME_ERROR_NAME,
                     expr->line,
                     expr->column,
                     (int)strlen(expr->as.identifier.name),
@@ -1004,7 +1167,7 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
                 return result_ok(value_bool(!truthy));
             }
             value_free(operand_result.value);
-            return result_error_at(evaluator, expr->line, expr->column, 1, "unsupported unary operator");
+            return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported unary operator");
         }
         case EXPR_BINARY: {
             EvalResult left = eval_expression(evaluator, expr->as.binary.left);
@@ -1061,7 +1224,7 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
                     if (right.value.as.number == 0.0) {
                         value_free(left.value);
                         value_free(right.value);
-                        return result_error_at(evaluator, expr->line, expr->column, 1, "division by zero");
+                        return result_runtime_error_at(evaluator, RUNTIME_ERROR_MATH, expr->line, expr->column, 1, "division by zero");
                     }
                     {
                         double value = left.value.as.number / right.value.as.number;
@@ -1109,7 +1272,7 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
                 default:
                     value_free(left.value);
                     value_free(right.value);
-                    return result_error_at(evaluator, expr->line, expr->column, 1, "unsupported binary operator");
+                    return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported binary operator");
             }
         }
         case EXPR_LOGICAL:
@@ -1129,7 +1292,7 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
         case EXPR_PROPERTY:
             return eval_property(evaluator, expr);
     }
-    return result_error_at(evaluator, expr->line, expr->column, 1, "unsupported expression kind");
+    return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported expression kind");
 }
 
 static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
@@ -1143,13 +1306,14 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
             if (result.had_error) {
                 return result;
             }
-            if (!env_define(evaluator->env, stmt->as.var.name, result.value, stmt->as.var.is_const)) {
-                value_free(result.value);
-                return result_error_at_take(
-                    evaluator,
-                    stmt->line,
-                    stmt->column,
-                    (int)strlen(stmt->as.var.name),
+                if (!env_define(evaluator->env, stmt->as.var.name, result.value, stmt->as.var.is_const)) {
+                    value_free(result.value);
+                    return result_runtime_error_at_take(
+                        evaluator,
+                        RUNTIME_ERROR_NAME,
+                        stmt->line,
+                        stmt->column,
+                        (int)strlen(stmt->as.var.name),
                     jsrt_format("redeclaration of '%s' in the same scope", stmt->as.var.name)
                 );
             }
@@ -1334,8 +1498,9 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
                 Value fn_value = value_function(function);
                 if (!env_define(evaluator->env, stmt->as.function.name, fn_value, true)) {
                     value_free(fn_value);
-                    return result_error_at_take(
+                    return result_runtime_error_at_take(
                         evaluator,
+                        RUNTIME_ERROR_NAME,
                         stmt->line,
                         stmt->column,
                         (int)strlen(stmt->as.function.name),
@@ -1359,7 +1524,14 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
         case STMT_BREAK: {
             EvalResult result;
             if (evaluator->loop_depth <= 0 && evaluator->switch_depth <= 0) {
-                return result_error_at(evaluator, stmt->line, stmt->column, 5, "break is only valid inside a loop or switch");
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_CONTROL_FLOW,
+                    stmt->line,
+                    stmt->column,
+                    5,
+                    "break is only valid inside a loop or switch"
+                );
             }
             result = result_ok(value_null());
             result.is_break = true;
@@ -1368,14 +1540,21 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
         case STMT_CONTINUE: {
             EvalResult result;
             if (evaluator->loop_depth <= 0) {
-                return result_error_at(evaluator, stmt->line, stmt->column, 8, "continue is only valid inside a loop");
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_CONTROL_FLOW,
+                    stmt->line,
+                    stmt->column,
+                    8,
+                    "continue is only valid inside a loop"
+                );
             }
             result = result_ok(value_null());
             result.is_continue = true;
             return result;
         }
     }
-    return result_error_at(evaluator, stmt->line, stmt->column, 1, "unsupported statement kind");
+    return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, stmt->line, stmt->column, 1, "unsupported statement kind");
 }
 
 EvalResult eval_program(const StmtArray *program, const char *source, Env *env) {
@@ -1403,7 +1582,14 @@ EvalResult eval_program(const StmtArray *program, const char *source, Env *env) 
         }
         if (result.is_return) {
             value_free(result.value);
-            return result_error_at(&evaluator, program->items[i]->line, program->items[i]->column, 6, "return is only valid inside a function body");
+            return result_runtime_error_at(
+                &evaluator,
+                RUNTIME_ERROR_CONTROL_FLOW,
+                program->items[i]->line,
+                program->items[i]->column,
+                6,
+                "return is only valid inside a function body"
+            );
         }
     }
     return result;

@@ -53,6 +53,10 @@ static EvalResult eval_result_for(const char *source) {
         failure.is_break = false;
         failure.is_continue = false;
         failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
         failure.error_message = error;
         return failure;
     }
@@ -65,6 +69,10 @@ static EvalResult eval_result_for(const char *source) {
         failure.is_break = false;
         failure.is_continue = false;
         failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
         failure.error_message = error;
         return failure;
     }
@@ -147,10 +155,13 @@ void run_diagnostics_tests(TestContext *ctx) {
     {
         EvalResult result = eval_result_for("let arr = [1];\narr[3];\n");
         EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_INDEX);
+        EXPECT_INT_EQ(ctx, result.error_line, 2);
+        EXPECT_INT_EQ(ctx, result.error_column, 4);
         EXPECT_STRING_EQ(
             ctx,
             result.error_message,
-            "Runtime error at 2:4: array index out of bounds\n"
+            "Runtime error [index] at 2:4: array index out of bounds\n"
             "arr[3];\n"
             "   ^"
         );
@@ -160,12 +171,43 @@ void run_diagnostics_tests(TestContext *ctx) {
     {
         EvalResult result = eval_result_for("continue;\n");
         EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_CONTROL_FLOW);
+        EXPECT_INT_EQ(ctx, result.error_line, 1);
+        EXPECT_INT_EQ(ctx, result.error_column, 1);
         EXPECT_STRING_EQ(
             ctx,
             result.error_message,
-            "Runtime error at 1:1: continue is only valid inside a loop\n"
+            "Runtime error [control-flow] at 1:1: continue is only valid inside a loop\n"
             "continue;\n"
             "^^^^^^^^"
+        );
+        eval_result_free(&result);
+    }
+
+    {
+        EvalResult result = eval_result_for("len(3);\n");
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_TYPE);
+        EXPECT_STRING_EQ(
+            ctx,
+            result.error_message,
+            "Runtime error [type] at 1:4: len() expects a string, array, or object\n"
+            "len(3);\n"
+            "   ^"
+        );
+        eval_result_free(&result);
+    }
+
+    {
+        EvalResult result = eval_result_for("print();\n");
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_ARITY);
+        EXPECT_STRING_EQ(
+            ctx,
+            result.error_message,
+            "Runtime error [arity] at 1:6: expected 1 arguments but got 0\n"
+            "print();\n"
+            "     ^"
         );
         eval_result_free(&result);
     }

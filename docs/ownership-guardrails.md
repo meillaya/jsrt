@@ -78,6 +78,7 @@ When N8 changes this document, it must keep these constraints explicit:
 
 - `EvalResult.value` is owned by the caller and must be released with `value_free`.
 - `eval_result_free` only frees the error message, not the value payload.
+- `EvalResult` also carries structured runtime error metadata; successful paths reset it to `RUNTIME_ERROR_NONE`.
 - Control-flow helpers (`is_return`, `is_break`, `is_continue`) piggyback on `EvalResult`.
 - Runtime code must free intermediate values on all success and error branches.
 

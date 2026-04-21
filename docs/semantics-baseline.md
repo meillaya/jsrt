@@ -63,6 +63,7 @@ Evidence:
 
 - Parser is recursive-descent and supports aggregated syntax diagnostics after recovery to later statement boundaries.
 - Diagnostics include source lines and caret markers.
+- Runtime diagnostics are categorized (`type`, `name`, `arity`, `lookup`, `assignment`, `control-flow`, `index`, `math`, `internal`) while preserving the underlying message text.
 - Invalid top-level loop control and invalid assignment/index/property operations fail with runtime diagnostics, not silent fallback behavior.
 
 Evidence:

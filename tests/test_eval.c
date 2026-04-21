@@ -25,6 +25,10 @@ static EvalResult evaluate_source(const char *source, char **parse_error) {
         failure.is_break = false;
         failure.is_continue = false;
         failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
         failure.error_message = *parse_error;
         return failure;
     }
@@ -37,6 +41,10 @@ static EvalResult evaluate_source(const char *source, char **parse_error) {
         failure.is_break = false;
         failure.is_continue = false;
         failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
         failure.error_message = *parse_error;
         return failure;
     }

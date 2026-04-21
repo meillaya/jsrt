@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
     StmtArray program;
     char *error = NULL;
     Env *env = NULL;
-    EvalResult result = {false, false, false, false, {VALUE_NULL, {0}}, NULL};
+    EvalResult result = {false, false, false, false, {VALUE_NULL, {0}}, RUNTIME_ERROR_NONE, 0, 0, 0, NULL};
     int exit_code = 0;
     bool lexed = false;
     bool parsed = false;

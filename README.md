@@ -107,21 +107,22 @@ Current baseline/process artifacts live in:
 - `docs/diagnostics-golden-harness.md`
 - `docs/built-in-library-foundation.md`
 - `docs/gc-observability-and-stress.md`
+- `docs/runtime-error-model.md`
 
 ## Current roadmap focus
 
-The active runtime milestone is **M4 — built-in library foundation**. Its execution contract lives in:
-- `.omx/plans/prd-javascript-runtime-roadmap-m4-built-in-library-foundation.md`
-- `.omx/plans/test-spec-javascript-runtime-roadmap-m4-built-in-library-foundation.md`
-- `docs/built-in-library-foundation.md`
+The active runtime milestone is **M5 — exceptionless structured runtime error model**. Its execution contract lives in:
+- `.omx/plans/prd-javascript-runtime-roadmap-m5-structured-runtime-error-model.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m5-structured-runtime-error-model.md`
+- `docs/runtime-error-model.md`
 
-M4 stays intentionally narrow:
-1. add a minimal native-call abstraction
-2. expose `print`, `len`, and `typeOf` as global built-ins
-3. keep diagnostics source-based for misuse
-4. avoid broad host embedding or standard-library sprawl
+M5 stays intentionally bounded:
+1. add structured runtime error metadata to `EvalResult`
+2. normalize runtime diagnostics with explicit categories
+3. keep the model exceptionless and source-based
+4. avoid changing parser/lexer diagnostics or adding recovery semantics
 
-Likely follow-ons after M4:
-1. M5 — runtime error model cleanup as the runtime surface grows
-2. M6 — backend/IR planning on the cleaner heap model
-3. future built-in expansion only if later milestones explicitly require it
+Likely follow-ons after M5:
+1. M6 — backend/IR planning on the cleaner heap model
+2. future built-in expansion only if later milestones explicitly require it
+3. targeted runtime ergonomics only when justified by later surface growth
