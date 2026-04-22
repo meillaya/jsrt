@@ -80,8 +80,26 @@ Use the command that matches the question you are answering:
 
 ```text
 mode,fixture,category,backend,compare,iterations,warmups,total_ms,mean_ms,min_ms,max_ms,status,stdout_match
-bench,benchmarks/arithmetic-control.js,arithmetic_control,treewalk,no,5,1,23.40,4.68,4.61,4.75,ok,na
+bench,benchmarks/arithmetic_control.js,arithmetic_control,treewalk,yes,5,1,3.200,0.640,0.600,0.700,ok,yes
 ```
+
+## Optional local profiling commands
+
+These are optional local aids, not part of the required L1 contract:
+
+```sh
+time ./build/jsrt benchmarks/arithmetic_control.js
+JSRT_BACKEND=vm time ./build/jsrt benchmarks/vm_subset.js
+```
+
+If your machine has `perf`, you can also do a local-only sample such as:
+
+```sh
+perf stat ./build/jsrt benchmarks/aggregates.js
+JSRT_BACKEND=vm perf stat ./build/jsrt benchmarks/vm_subset.js
+```
+
+Treat these as investigative follow-ups after the CSV benchmark workflow, not as required benchmark outputs.
 
 ## Guardrails
 

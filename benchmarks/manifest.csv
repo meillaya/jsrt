@@ -1,0 +1,6 @@
+fixture,category,supported_backends,compare,expected_stdout,smoke_expectation
+benchmarks/arithmetic_control.js,arithmetic_control,treewalk|vm,yes,34750,exact_stdout
+benchmarks/calls_closures.js,calls_closures,treewalk|vm,yes,4620,exact_stdout
+benchmarks/aggregates.js,aggregates,treewalk|vm,yes,jsrt:92120:81,exact_stdout
+benchmarks/vm_subset.js,vm_subset,treewalk|vm,yes,number:5:480,exact_stdout
+benchmarks/gc_churn.js,gc_churn,treewalk,no,,exit_zero
