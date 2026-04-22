@@ -52,4 +52,5 @@ make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclu
 - Current status: `docs/project-status-and-architecture.md`
 - Semantics baseline: `docs/semantics-baseline.md`
 - Ownership/lifetimes: `docs/ownership-guardrails.md`
+- Benchmark harness: `docs/benchmark-and-profiling-harness.md`
 - Roadmap: `.omx/plans/prd-javascript-runtime-roadmap.md`
