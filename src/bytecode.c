@@ -40,11 +40,14 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_MAKE_ARRAY: return "MAKE_ARRAY";
         case BC_MAKE_OBJECT: return "MAKE_OBJECT";
         case BC_GET_INDEX: return "GET_INDEX";
+        case BC_GET_INDEX_KEEP: return "GET_INDEX_KEEP";
         case BC_SET_INDEX: return "SET_INDEX";
         case BC_NEW_INSTANCE: return "NEW_INSTANCE";
         case BC_CALL: return "CALL";
         case BC_CALL_METHOD: return "CALL_METHOD";
+        case BC_MAKE_INSTANCE: return "MAKE_INSTANCE";
         case BC_CALL_NEW: return "CALL_NEW";
+        case BC_LOAD_THIS: return "LOAD_THIS";
         case BC_MAKE_FUNCTION: return "MAKE_FUNCTION";
         case BC_RETURN: return "RETURN";
     }
@@ -128,13 +131,12 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
         case BC_LOAD_THIS:
         case BC_CALL:
         case BC_CALL_METHOD:
-        case BC_CALL_NEW:
-        case BC_NEW_INSTANCE:
         case BC_JUMP:
         case BC_JUMP_IF_FALSE:
         case BC_LOOP:
         case BC_MAKE_ARRAY:
         case BC_MAKE_OBJECT:
+        case BC_CALL_NEW:
             return jsrt_format("%04zu %-14s %d\n", index, name, instruction->operand);
         case BC_MAKE_FUNCTION:
             return jsrt_format(
@@ -146,6 +148,8 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
                     ? program->functions[(size_t)instruction->operand].name
                     : "<anonymous>"
             );
+        case BC_MAKE_INSTANCE:
+            return jsrt_format("%04zu %s\n", index, name);
         default:
             return jsrt_format("%04zu %s\n", index, name);
     }

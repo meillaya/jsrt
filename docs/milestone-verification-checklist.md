@@ -43,18 +43,19 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 - [ ] `docs/semantics-baseline.md` is updated to describe the bounded L2 surface, while keeping `this` / `new` / constructors / classes deferred to L3
 - [ ] the ASan lane is re-run after the final object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
-## L3 `this` / constructor semantics exit gates
+## L3 `this` / constructor exit gates
 
-Use this addendum when verifying the bounded L3 milestone. L3 is done only when receiver binding and constructors land **without** widening into L4 class/function-object semantics.
+Use this addendum when verifying the bounded L3 milestone.
 
-- [ ] `this` is verified as `null` for bare/plain/extracted calls and at top level
-- [ ] dot-call and bracket-call method dispatch bind `this` to the original receiver, including prototype-inherited methods
-- [ ] `new Ctor(args)` is verified for instance allocation, constructor field writes, prototype-slot wiring, and constructor return replacement rules
-- [ ] invalid constructor targets (`new` on non-function values or native functions) fail with runtime type diagnostics in both backends
-- [ ] function property behavior stays explicitly narrow: only `prototype` / `["prototype"]` are supported, invalid prototype writes fail, and all other function property reads/writes fail with runtime type diagnostics
-- [ ] bytecode/disassembly evidence covers `CALL`, `CALL_METHOD`, `CALL_NEW`, and the constructor-instance preparation step
-- [ ] evaluator and VM suites cover the same supported positive and negative L3 cases before milestone closure
-- [ ] docs/examples explicitly show L3 support while keeping classes deferred to L4
+- [ ] lexer/parser coverage locks in `this` / `new` tokens, explicit AST forms, and bounded unsupported-`new` diagnostics
+- [ ] bare/plain/extracted-call `this` behavior is verified as `null`
+- [ ] dot/bracket method calls bind `this` to the concrete receiver, including prototype-inherited methods
+- [ ] constructor allocation, prototype wiring, and constructor return-value rules are covered in both evaluator and VM suites
+- [ ] bounded function `prototype` reads/writes are covered, including native-function `prototype` behavior
+- [ ] non-`prototype` function property access/assignment remains rejected with runtime type diagnostics
+- [ ] bytecode/disassembly evidence captures `BC_CALL`, `BC_CALL_METHOD`, `BC_CALL_NEW`, and the hidden `this` load path
+- [ ] at least one example demonstrates constructor + prototype-method interaction
+- [ ] `docs/semantics-baseline.md` is updated to describe the landed L3 surface while keeping classes deferred to L4
 - [ ] the ASan lane is re-run after the final function/object graph changes land, and the exact command/result are captured in the completion evidence bundle
 
 ## Design-heavy milestones

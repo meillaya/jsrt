@@ -231,6 +231,17 @@ Expr *ast_new_call(Expr *callee, ExprArray arguments, int line, int column) {
     return expr;
 }
 
+Expr *ast_new_this(int line, int column) {
+    return alloc_expr(EXPR_THIS, line, column);
+}
+
+Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column) {
+    Expr *expr = alloc_expr(EXPR_NEW, line, column);
+    expr->as.new_expr.callee = callee;
+    expr->as.new_expr.arguments = arguments;
+    return expr;
+}
+
 Expr *ast_new_function_expr(const char *name, StringArray params, StmtArray body, int line, int column) {
     Expr *expr = alloc_expr(EXPR_FUNCTION, line, column);
     expr->as.function.name = name != NULL ? jsrt_strdup(name) : NULL;
@@ -388,6 +399,12 @@ void expr_destroy(Expr *expr) {
         case EXPR_CALL:
             expr_destroy(expr->as.call.callee);
             expr_array_free(&expr->as.call.arguments);
+            break;
+        case EXPR_THIS:
+            break;
+        case EXPR_NEW:
+            expr_destroy(expr->as.new_expr.callee);
+            expr_array_free(&expr->as.new_expr.arguments);
             break;
         case EXPR_FUNCTION:
             free(expr->as.function.name);

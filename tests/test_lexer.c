@@ -53,7 +53,7 @@ void run_lexer_tests(TestContext *ctx) {
     EXPECT_INT_EQ(ctx, tokens.items[0].type, TOKEN_CONST);
     token_array_free(&tokens);
 
-    EXPECT_TRUE(ctx, lex_source("this; new Thing();", &tokens, &error));
+    EXPECT_TRUE(ctx, lex_source("this; new Box();", &tokens, &error));
     if (error != NULL) {
         free(error);
     }

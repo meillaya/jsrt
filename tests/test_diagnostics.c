@@ -152,25 +152,25 @@ void run_diagnostics_tests(TestContext *ctx) {
     );
     free(error);
 
-    error = parse_error_for("new Ctor;");
+    error = parse_error_for("new Box;");
     EXPECT_TRUE(ctx, error != NULL);
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:9: expected '(' after constructor target in 'new' expression\n"
-        "new Ctor;\n"
-        "        ^"
+        "Parser error at 1:8: expected '(' after constructor target in 'new' expression\n"
+        "new Box;\n"
+        "       ^"
     );
     free(error);
 
-    error = parse_error_for("new factory()(1);");
+    error = parse_error_for("new )");
     EXPECT_TRUE(ctx, error != NULL);
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:14: calling the result of 'new' is not supported in L3\n"
-        "new factory()(1);\n"
-        "             ^"
+        "Parser error at 1:5: expected constructor target after 'new'\n"
+        "new )\n"
+        "    ^"
     );
     free(error);
 

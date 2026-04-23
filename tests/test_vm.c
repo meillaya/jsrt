@@ -515,6 +515,58 @@ void run_vm_tests(TestContext *ctx) {
         eval_result_free(&result);
     }
 
+    assert_backend_parity(ctx, "this;\n");
+    assert_backend_parity(
+        ctx,
+        "let proto = {get: function () { return this.value; }};\n"
+        "function Box(value) { this.value = value; }\n"
+        "Box.prototype = proto;\n"
+        "let box = new Box(7);\n"
+        "box.get();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {get: function () { return this.value; }};\n"
+        "function Box(value) { this.value = value; }\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(7);\n"
+        "box[\"get\"]();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {who: function () { return this; }};\n"
+        "function Box() {}\n"
+        "Box.prototype = proto;\n"
+        "let box = new Box();\n"
+        "let who = box.who;\n"
+        "who();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Wrapper() { return 1; }\n"
+        "typeOf(new Wrapper());\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Wrapper() { return {value: 9}; }\n"
+        "let wrapped = new Wrapper();\n"
+        "wrapped.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let trace = \"\";\n"
+        "let obj = {m: function (x) { return trace + \":\" + x; }};\n"
+        "function base() { trace = trace + \"B\"; return obj; }\n"
+        "function key() { trace = trace + \"K\"; return \"m\"; }\n"
+        "function arg() { trace = trace + \"A\"; return \"!\"; }\n"
+        "base()[key()](arg());\n"
+    );
+    assert_backend_error_contains(ctx, "let f = function () {};\nf.prototype = 1;\n", "function prototype assignment expects an object or null");
+    assert_backend_error_contains(ctx, "let f = function () {};\nf.x;\n", "function property access only supports 'prototype'");
+    assert_backend_error_contains(ctx, "let f = function () {};\nf[1];\n", "function indexing expects the string key 'prototype'");
+    assert_backend_error_contains(ctx, "new 1();\n", "attempted to construct a non-function value");
+    assert_backend_error_contains(ctx, "new print(\"x\");\n", "native functions are not constructors");
+
     {
         FILE *file;
         char buffer[128];

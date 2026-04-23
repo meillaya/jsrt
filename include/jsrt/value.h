@@ -21,6 +21,7 @@ typedef struct JsFunction {
     const struct Stmt *declaration;
     const struct Expr *expression;
     Env *closure;
+    JsObject *constructor_prototype;
     const char *native_name;
     size_t native_arity;
     const struct BytecodeFunction *bytecode;

@@ -212,10 +212,11 @@ void run_bytecode_tests(TestContext *ctx) {
 
     {
         const char *source =
-            "function Ctor(n) { this.value = n; }\n"
-            "let obj = {value: 2, method: function (n) { return this.value + n; }};\n"
-            "let made = new Ctor(3);\n"
-            "obj.method(4);\n";
+            "let proto = {get: function () { return this.value; }};\n"
+            "function Box(value) { this.value = value; }\n"
+            "Box.prototype = proto;\n"
+            "let box = new Box(7);\n"
+            "box.get();\n";
         BytecodeProgram program;
         char *error = NULL;
         char *disassembly;
@@ -224,10 +225,10 @@ void run_bytecode_tests(TestContext *ctx) {
         EXPECT_TRUE(ctx, error == NULL);
         disassembly = bytecode_disassemble_program(&program);
         EXPECT_TRUE(ctx, strstr(disassembly, "LOAD_THIS") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "NEW_INSTANCE") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "GET_INDEX_KEEP") != NULL);
         EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "SWAP") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "MAKE_INSTANCE") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
         free(disassembly);
         bytecode_program_free(&program);
     }

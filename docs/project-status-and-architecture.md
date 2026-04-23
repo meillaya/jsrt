@@ -382,13 +382,13 @@ The immediate next major milestones are no longer basic language features. The c
    - Add a repeatable performance corpus and measurement harness.
    - Establish baseline numbers before optimization or architecture expansion.
 
-2. **L2 — Prototype chain and method dispatch**
-   - Introduce inheritance-style object lookup semantics.
-   - This is the first major step from “object literals” toward a richer JavaScript object model.
+2. **L4 — Class syntax and desugaring/direct support**
+   - Layer a bounded class surface over the landed L3 constructor/prototype runtime.
+   - Keep the class design explicitly downstream of the current constructor semantics.
 
-3. **L3 — `this` binding and constructor semantics**
-   - Define method invocation context and object construction rules on top of the L2 prototype lookup model.
-   - Keep the surface bounded to `this`, `new`, constructors, and the narrow function `prototype` slot; classes remain L4 work.
+3. **L5 — Module system**
+   - Introduce import/export boundaries once the current single-file execution surface is no longer the limiting factor.
+   - Preserve the current diagnostics and verification discipline as the surface broadens.
 
 ### Larger long-horizon targets
 

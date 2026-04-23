@@ -1037,144 +1037,121 @@ void run_eval_tests(TestContext *ctx) {
         token_array_free(&tokens);
     }
 
-    result = evaluate_source("this == null;\n", &error);
+    result = evaluate_source("this;\n", &error);
     EXPECT_FALSE(ctx, result.had_error);
-    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
-    EXPECT_TRUE(ctx, result.value.as.boolean);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
     value_free(result.value);
     eval_result_free(&result);
 
     result = evaluate_source(
-        "function Person(name) { this.name = name; }\n"
-        "Person.prototype = {\n"
-        "  describe: function () {\n"
-        "    if (this == null) { return \"null\"; }\n"
-        "    return this.name;\n"
-        "  }\n"
-        "};\n"
-        "let ada = new Person(\"Ada\");\n"
-        "let extracted = ada.describe;\n"
-        "ada.describe() + \":\" + extracted() + \":\" + (this == null);\n",
+        "let proto = {get: function () { return this.value; }};\n"
+        "function Box(value) { this.value = value; }\n"
+        "Box.prototype = proto;\n"
+        "let box = new Box(7);\n"
+        "box.get();\n",
         &error
     );
     EXPECT_FALSE(ctx, result.had_error);
-    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "Ada:null:true");
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 7.0);
     value_free(result.value);
     eval_result_free(&result);
 
     result = evaluate_source(
-        "function Person(name) { this.name = name; }\n"
-        "let proto = {\n"
-        "  greet: function () { return this.name; }\n"
-        "};\n"
-        "Person.prototype = proto;\n"
-        "let ada = new Person(\"Ada\");\n"
-        "ada.greet() + \":\" + ada[\"greet\"]();\n",
+        "let proto = {get: function () { return this.value; }};\n"
+        "function Box(value) { this.value = value; }\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(7);\n"
+        "box[\"get\"]();\n",
         &error
     );
     EXPECT_FALSE(ctx, result.had_error);
-    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "Ada:Ada");
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 7.0);
     value_free(result.value);
     eval_result_free(&result);
 
     result = evaluate_source(
-        "function Keep(n) { this.n = n; return 7; }\n"
-        "function Replace() { return {ok: 9}; }\n"
-        "let kept = new Keep(4);\n"
-        "let replaced = new Replace();\n"
-        "kept.n + \":\" + replaced.ok;\n",
-        &error
-    );
-    EXPECT_FALSE(ctx, result.had_error);
-    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "4:9");
-    value_free(result.value);
-    eval_result_free(&result);
-
-    result = evaluate_source(
+        "let proto = {who: function () { return this; }};\n"
         "function Box() {}\n"
-        "let firstProto = {label: \"first\"};\n"
-        "let secondProto = {label: \"second\"};\n"
-        "Box.prototype = firstProto;\n"
-        "let first = new Box();\n"
-        "Box[\"prototype\"] = secondProto;\n"
-        "let second = new Box();\n"
-        "Box.prototype.label + \":\" + first.label + \":\" + second.label;\n",
+        "Box.prototype = proto;\n"
+        "let box = new Box();\n"
+        "let who = box.who;\n"
+        "who();\n",
         &error
     );
     EXPECT_FALSE(ctx, result.had_error);
-    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "second:first:second");
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
     value_free(result.value);
     eval_result_free(&result);
 
     result = evaluate_source(
-        "let order = \"\";\n"
-        "function mark(label, value) { order = order + label; return value; }\n"
-        "let obj = {\n"
-        "  value: 0,\n"
-        "  method: function (value) { this.value = value; return this.value; }\n"
-        "};\n"
-        "function getObj() { order = order + \"b\"; return obj; }\n"
-        "getObj()[mark(\"k\", \"method\")](mark(\"a\", 7));\n"
-        "order + \":\" + obj.value;\n",
+        "function Wrapper() { return 1; }\n"
+        "typeOf(new Wrapper());\n",
         &error
     );
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "bka:7");
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "object");
     value_free(result.value);
     eval_result_free(&result);
 
-    result = evaluate_source("let ctor = 1;\nnew ctor(2);\n", &error);
-    EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "new expects a constructor function") != NULL);
+    result = evaluate_source(
+        "function Wrapper() { return {value: 9}; }\n"
+        "let wrapped = new Wrapper();\n"
+        "wrapped.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 9.0);
+    value_free(result.value);
     eval_result_free(&result);
 
-    result = evaluate_source("typeOf(print.prototype);\n", &error);
+    result = evaluate_source(
+        "let trace = \"\";\n"
+        "let obj = {m: function (x) { return trace + \":\" + x; }};\n"
+        "function base() { trace = trace + \"B\"; return obj; }\n"
+        "function key() { trace = trace + \"K\"; return \"m\"; }\n"
+        "function arg() { trace = trace + \"A\"; return \"!\"; }\n"
+        "base()[key()](arg());\n",
+        &error
+    );
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "null");
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "BKA:!");
     value_free(result.value);
     eval_result_free(&result);
 
-    result = evaluate_source("new print(1);\n", &error);
+    result = evaluate_source("let f = function () {};\nf.prototype = 1;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function prototype assignment expects an object or null") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("let f = function () {};\nf.x;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function property access only supports 'prototype'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("let f = function () {};\nf[1];\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function indexing expects the string key 'prototype'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("print.prototype;\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("new 1();\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "attempted to construct a non-function value") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("new print(\"x\");\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
     EXPECT_TRUE(ctx, strstr(result.error_message, "native functions are not constructors") != NULL);
-    eval_result_free(&result);
-
-    result = evaluate_source("print.prototype = {};\n", &error);
-    EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "native functions are not constructors") != NULL);
-    eval_result_free(&result);
-
-    result = evaluate_source(
-        "function Box() {}\n"
-        "Box.prototype = 1;\n",
-        &error
-    );
-    EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "function prototype must be an object or null") != NULL);
-    eval_result_free(&result);
-
-    result = evaluate_source(
-        "function Box() {}\n"
-        "Box.extra;\n",
-        &error
-    );
-    EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "function properties are limited to 'prototype' in L3") != NULL);
-    eval_result_free(&result);
-
-    result = evaluate_source(
-        "function Box() {}\n"
-        "Box[0];\n",
-        &error
-    );
-    EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "function properties are limited to 'prototype' in L3") != NULL);
     eval_result_free(&result);
 
     assert_example_output(ctx, "examples/arithmetic.js", "7\n");
@@ -1190,6 +1167,7 @@ void run_eval_tests(TestContext *ctx) {
     assert_example_output(ctx, "examples/function_expressions.js", "11\n");
     assert_example_output(ctx, "examples/constructors.js", "hello Ada\n");
     assert_example_output(ctx, "examples/const.js", "7\n");
+    assert_example_output(ctx, "examples/constructors.js", "7:9:true\n");
     assert_example_output(ctx, "examples/references.js", "5:9:7\n");
     assert_example_output(ctx, "examples/builtins.js", "object:5:3\n");
     assert_example_output(ctx, "examples/gc_stress.js", "85\n");
