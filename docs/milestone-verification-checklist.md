@@ -262,3 +262,53 @@ The original N8 implementation diff is not cleanly recoverable as one single his
 - Keep N8 documentation explicit that it is a bounded managed-heap MVP, not broad/full heap collection.
 - Treat later GC observability, aggregate-semantics, and backend-planning work as follow-on milestones rather than retroactively widening N8.
 - Do not widen ownership scope without revisiting the N7/N8 ADR + PRD constraints.
+
+## M3 closure record — 2026-04-23
+
+This section formally closes the bounded **M3 — Mutable aggregate/reference model implementation** milestone against its approved PRD/test-spec and the retained repo evidence below.
+
+This closure record applies to the repo’s bounded shared-reference aggregate model: arrays and objects now preserve identity across environment flow and alias-visible mutation, while structural equality/stringification remain intentionally bounded and cycle-safe. It does **not** claim broad ECMAScript-complete object/reference semantics.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `./build/jsrt examples/references.js` → `5:9:7`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1035 assertions`
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
+- Current runtime/baseline evidence for the landed M3 surface is retained in:
+  - `docs/semantics-baseline.md`
+  - `docs/project-status-and-architecture.md`
+  - `examples/references.js`
+  - `src/value.c`
+  - `tests/test_eval.c`
+
+### Changed files in the M3 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m3-mutable-aggregate-reference-model.md`
+- `README.md`
+- `docs/ownership-guardrails.md`
+- `docs/semantics-baseline.md`
+- `examples/references.js`
+- `src/value.c`
+- `tests/test_eval.c`
+
+### Simplifications made
+
+- Removed deep cloning from aggregate value flow instead of inventing a separate aliasing model.
+- Preserved structural equality and stringification for acyclic values while hardening both against self-referential structures.
+- Kept the milestone bounded to aggregate identity/mutation semantics instead of widening it into a broader language redesign.
+
+### Remaining risks
+
+- The shared-reference aggregate model is still intentionally narrower than full JavaScript object/reference semantics.
+- Future aggregate work must preserve cycle-safe stringification/equality unless a later milestone intentionally revisits that contract.
+- Broader coercion/equality/host-interaction questions remain outside this milestone’s closure boundary.
+
+### Milestone-specific follow-ups
+
+- Keep later aggregate work explicit about whether it changes equality, stringification, or host-facing mutation semantics.
+- Treat future aggregate/runtime changes as follow-on milestones rather than retroactively broadening M3.
+- Preserve cycle-safety guarantees unless a later milestone deliberately replaces them with a new tested contract.

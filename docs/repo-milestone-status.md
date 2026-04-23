@@ -30,7 +30,7 @@ Document-role boundaries:
 | N8 — General heap GC MVP | DONE | Evidence | `docs/project-status-and-architecture.md`; `docs/milestone-verification-checklist.md`; `docs/n8-general-heap-gc-mvp-notes.md`; `src/gc.c`; `include/jsrt/gc.h`; `examples/gc_stress.js` | Current-state docs and runtime code explicitly describe and implement the bounded managed-heap path for `Env`, `JsFunction`, `JsArray`, and `JsObject`, and the checklist now contains an explicit N8 closure record. |
 | M1 — GC observability and stress rig | DONE | Evidence | `docs/gc-observability-and-stress.md`; `include/jsrt/gc.h`; `examples/gc_stress.js` | GC counters, trace mode, and stress coverage are documented and implemented. |
 | M2 — Aggregate semantics ADR (`copy` vs `reference`) | DONE | Evidence | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md`; `docs/aggregate-semantics-adr.md` | Design/ADR milestone: the decision artifact exists. Some companion wording is now stale; see appendix below. |
-| M3 — Mutable aggregate/reference model implementation | DONE | Evidence | `docs/semantics-baseline.md`; `docs/project-status-and-architecture.md`; `examples/references.js`; `tests/test_eval.c` | Current baseline explicitly says arrays/objects preserve shared identity and alias-visible mutation. |
+| M3 — Mutable aggregate/reference model implementation | DONE | Evidence | `docs/semantics-baseline.md`; `docs/milestone-verification-checklist.md`; `docs/project-status-and-architecture.md`; `examples/references.js`; `tests/test_eval.c` | Current baseline explicitly says arrays/objects preserve shared identity and alias-visible mutation, and the checklist now contains an explicit M3 closure record. |
 | M4 — Built-in library foundation | DONE | Evidence | `docs/built-in-library-foundation.md`; `README.md`; `src/eval.c`; `tests/test_eval.c` | `print`, `len`, `typeOf`, and `setPrototypeOf` exist as the bounded built-in surface. |
 | M5 — Exceptionless structured runtime error model | DONE | Evidence | `docs/runtime-error-model.md`; `tests/test_diagnostics.c`; `src/eval.c` | Structured runtime error categories and source-based reporting are current behavior. |
 | M6 — Bytecode / IR architecture spike | DONE | Evidence | `docs/bytecode-ir-architecture-spike.md`; `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | Design/ADR milestone: backend direction artifact exists and handed off to M7/M8. |
@@ -60,6 +60,7 @@ These milestones have a repo-local artifact that directly records completion or 
 | N7 — General heap GC architecture spike | `.omx/plans/adr-javascript-runtime-n7-general-heap-gc.md` | ADR says it is **accepted for roadmap handoff to N8**, which is the completion artifact for this design milestone. |
 | N8 — General heap GC MVP | `docs/milestone-verification-checklist.md` | Contains the **N8 closure record — 2026-04-23** with retained managed-heap/stress/ASan evidence for the bounded N8 surface. |
 | M2 — Aggregate semantics ADR (`copy` vs `reference`) | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md` | ADR says it is **accepted for roadmap handoff to M3**, which is the completion artifact for this design milestone. |
+| M3 — Mutable aggregate/reference model implementation | `docs/milestone-verification-checklist.md` | Contains the **M3 closure record — 2026-04-23** with retained reference-semantics/example/ASan evidence for the bounded M3 surface. |
 | M6 — Bytecode / IR architecture spike | `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | ADR says it is **accepted for roadmap handoff to M7/M8**, which is the completion artifact for this design milestone. |
 | M8 — VM interpreter parity backend | `docs/milestone-verification-checklist.md` | Contains the **M8 closure record — 2026-04-23** with retained parity/backend-switch/ASan evidence for the original bounded M8 surface. |
 | L4 — Class syntax and desugaring/direct support | `docs/milestone-verification-checklist.md` | Contains the **L4 closure record — 2026-04-23** with retained evidence and checked exit gates. |
@@ -68,7 +69,7 @@ These milestones have a repo-local artifact that directly records completion or 
 
 These milestones are marked `DONE` because the current repo clearly ships their bounded surface, but there is no single dedicated closure record currently serving as the milestone’s canonical completion artifact:
 
-`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M1`, `M3`, `M4`, `M5`, `M7`, `M9`, `M10`, `L1`, `L2`, `L3`
+`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M1`, `M4`, `M5`, `M7`, `M9`, `M10`, `L1`, `L2`, `L3`
 
 For these rows, the ledger relies on the cited current-state docs, examples, tests, and implementation files rather than a standalone milestone-closure record.
 
