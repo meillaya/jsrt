@@ -91,6 +91,7 @@ const char *token_type_name(TokenType type) {
         case TOKEN_CONST: return "const";
         case TOKEN_FUNCTION: return "function";
         case TOKEN_RETURN: return "return";
+        case TOKEN_THIS: return "this";
         case TOKEN_IF: return "if";
         case TOKEN_ELSE: return "else";
         case TOKEN_DO: return "do";
@@ -104,7 +105,6 @@ const char *token_type_name(TokenType type) {
         case TOKEN_TRUE: return "true";
         case TOKEN_FALSE: return "false";
         case TOKEN_NULL: return "null";
-        case TOKEN_THIS: return "this";
         case TOKEN_NEW: return "new";
         default: return "unknown";
     }
@@ -122,6 +122,9 @@ static TokenType identifier_type(const char *lexeme) {
     }
     if (strcmp(lexeme, "return") == 0) {
         return TOKEN_RETURN;
+    }
+    if (strcmp(lexeme, "this") == 0) {
+        return TOKEN_THIS;
     }
     if (strcmp(lexeme, "if") == 0) {
         return TOKEN_IF;
@@ -161,9 +164,6 @@ static TokenType identifier_type(const char *lexeme) {
     }
     if (strcmp(lexeme, "null") == 0) {
         return TOKEN_NULL;
-    }
-    if (strcmp(lexeme, "this") == 0) {
-        return TOKEN_THIS;
     }
     if (strcmp(lexeme, "new") == 0) {
         return TOKEN_NEW;

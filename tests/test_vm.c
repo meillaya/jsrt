@@ -348,6 +348,67 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(obj, proto);\n"
         "obj.speak();\n"
     );
+    assert_backend_parity(ctx, "this;\n");
+    assert_backend_parity(
+        ctx,
+        "let proto = {get: function () { return this.value; }};\n"
+        "let obj = {value: 11};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.get() + obj[\"get\"]();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let obj = {value: 11, get: function () { return this == null; }};\n"
+        "let extracted = obj.get;\n"
+        "extracted();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Ctor(value) {\n"
+        "  this.value = value;\n"
+        "}\n"
+        "Ctor.prototype.get = function () { return this.value; };\n"
+        "let instance = new Ctor(9);\n"
+        "instance.get();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function PrimitiveReturn() {\n"
+        "  this.value = 4;\n"
+        "  return 99;\n"
+        "}\n"
+        "let instance = new PrimitiveReturn();\n"
+        "instance.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function ObjectReturn() {\n"
+        "  this.value = 4;\n"
+        "  return {value: 12};\n"
+        "}\n"
+        "let instance = new ObjectReturn();\n"
+        "instance.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Ctor() {}\n"
+        "Ctor[\"prototype\"] = {answer: 8};\n"
+        "let instance = new Ctor();\n"
+        "instance.answer;\n"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "function Ctor() {}\n"
+        "Ctor.prototype = 3;\n",
+        "function prototype must be an object or null"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "function Ctor() {}\n"
+        "Ctor.extra;\n",
+        "function property access only supports 'prototype'"
+    );
+    assert_backend_error_contains(ctx, "new len(\"abc\");\n", "attempted to construct a non-constructor value");
     assert_backend_parity(
         ctx,
         "let proto = {hidden: 1};\n"

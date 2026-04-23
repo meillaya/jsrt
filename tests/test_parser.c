@@ -145,21 +145,17 @@ void run_parser_tests(TestContext *ctx) {
     stmt_array_free(&program);
 
     program = parse_program_or_fail(ctx,
-        "function Box(value) { this.value = value; }\n"
-        "new Box(7);\n"
+        "this;\n"
+        "new Thing(1, 2);\n"
+        "new registry[\"Thing\"]();\n"
     );
-    EXPECT_SIZE_EQ(ctx, program.count, 2U);
-    EXPECT_INT_EQ(ctx, program.items[0]->kind, STMT_FUNCTION);
-    EXPECT_INT_EQ(ctx, program.items[0]->as.function.body.items[0]->kind, STMT_EXPR);
-    EXPECT_INT_EQ(ctx, program.items[0]->as.function.body.items[0]->as.expr.expression->kind, EXPR_ASSIGN);
-    EXPECT_INT_EQ(
-        ctx,
-        program.items[0]->as.function.body.items[0]->as.expr.expression->as.assign.target->as.property.target->kind,
-        EXPR_THIS
-    );
+    EXPECT_SIZE_EQ(ctx, program.count, 3U);
+    EXPECT_INT_EQ(ctx, program.items[0]->as.expr.expression->kind, EXPR_THIS);
     EXPECT_INT_EQ(ctx, program.items[1]->as.expr.expression->kind, EXPR_NEW);
     EXPECT_INT_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.callee->kind, EXPR_IDENTIFIER);
-    EXPECT_SIZE_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.arguments.count, 1U);
+    EXPECT_SIZE_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.arguments.count, 2U);
+    EXPECT_INT_EQ(ctx, program.items[2]->as.expr.expression->kind, EXPR_NEW);
+    EXPECT_INT_EQ(ctx, program.items[2]->as.expr.expression->as.new_expr.callee->kind, EXPR_INDEX);
     stmt_array_free(&program);
 
     {
@@ -277,31 +273,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "new Thing;", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "expected '(' after constructor target") != NULL);
-        if (error != NULL) {
-            free(error);
-        }
-        token_array_free(&tokens);
-
-        EXPECT_TRUE(ctx, lex_source("new factory()(1);", &tokens, &error));
-        if (error != NULL) {
-            free(error);
-        }
-        EXPECT_FALSE(ctx, parse_tokens(&tokens, "new factory()(1);", &program, &error));
-        EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "calling the result of 'new' is unsupported in L3") != NULL);
-        if (error != NULL) {
-            free(error);
-        }
-        token_array_free(&tokens);
-
-        EXPECT_TRUE(ctx, lex_source("new (Thing)();", &tokens, &error));
-        if (error != NULL) {
-            free(error);
-        }
-        EXPECT_FALSE(ctx, parse_tokens(&tokens, "new (Thing)();", &program, &error));
-        EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "expected constructor target after 'new'") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "expected '(' after constructor target in 'new' expression") != NULL);
         if (error != NULL) {
             free(error);
         }

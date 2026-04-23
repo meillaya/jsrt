@@ -45,18 +45,12 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 
 ## L3 `this` / constructor exit gates
 
-Use this addendum when verifying the bounded L3 milestone.
-
-- [ ] top-level `this` is explicitly verified as `null`
-- [ ] `obj.method()` and `obj["method"]()` bind `this` to the receiver, including prototype-inherited methods
-- [ ] extracted/plain calls keep `this = null`
-- [ ] `new Ctor(args)` allocates an instance, binds `this`, and applies constructor writes to that instance
-- [ ] constructor return replacement rules are verified for aggregate/function returns vs primitive/null returns
-- [ ] `Ctor.prototype` / `Ctor["prototype"]` reads and writes are verified, including invalid non-object/non-null assignment failures
-- [ ] non-`prototype` function property access/assignment is rejected with runtime type diagnostics
-- [ ] native functions are explicitly verified as non-constructors with `prototype === null` and rejected `prototype` writes
-- [ ] bytecode/evaluator/VM coverage all include receiver-aware calls and constructor calls
-- [ ] at least one example program demonstrates constructor + prototype-method behavior
+- [ ] top-level `this = null` is locked in for both evaluator and VM
+- [ ] method calls bind `this` to the evaluated receiver for dot + bracket call forms, including prototype-inherited methods
+- [ ] extracted/plain calls still use `this = null`
+- [ ] `new Ctor(args...)` allocates an instance, respects constructor return rules, and uses the bounded function `prototype` slot
+- [ ] negative coverage locks in bare-`new`, parenthesized/call-expression constructor-target rejection, invalid function `prototype` writes, non-`prototype` function properties, and native-function construction failure
+- [ ] bytecode evidence explicitly covers `BC_CALL_METHOD`, `BC_ALLOC_INSTANCE`, and `BC_CALL_NEW`
 
 ## Design-heavy milestones
 

@@ -194,6 +194,12 @@ Expr *ast_new_identifier(const char *name, int line, int column) {
     return expr;
 }
 
+Expr *ast_new_this(int line, int column) {
+    Expr *expr = alloc_expr(EXPR_THIS, line, column);
+    expr->as.this_expr.reserved = 0;
+    return expr;
+}
+
 Expr *ast_new_unary(TokenType op, Expr *operand, int line, int column) {
     Expr *expr = alloc_expr(EXPR_UNARY, line, column);
     expr->as.unary.op = op;
@@ -229,10 +235,6 @@ Expr *ast_new_call(Expr *callee, ExprArray arguments, int line, int column) {
     expr->as.call.callee = callee;
     expr->as.call.arguments = arguments;
     return expr;
-}
-
-Expr *ast_new_this(int line, int column) {
-    return alloc_expr(EXPR_THIS, line, column);
 }
 
 Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column) {
@@ -381,6 +383,8 @@ void expr_destroy(Expr *expr) {
         case EXPR_IDENTIFIER:
             free(expr->as.identifier.name);
             break;
+        case EXPR_THIS:
+            break;
         case EXPR_UNARY:
             expr_destroy(expr->as.unary.operand);
             break;
@@ -399,8 +403,6 @@ void expr_destroy(Expr *expr) {
         case EXPR_CALL:
             expr_destroy(expr->as.call.callee);
             expr_array_free(&expr->as.call.arguments);
-            break;
-        case EXPR_THIS:
             break;
         case EXPR_NEW:
             expr_destroy(expr->as.new_expr.callee);

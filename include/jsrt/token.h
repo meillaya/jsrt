@@ -36,6 +36,7 @@ typedef enum {
     TOKEN_CONST,
     TOKEN_FUNCTION,
     TOKEN_RETURN,
+    TOKEN_THIS,
     TOKEN_IF,
     TOKEN_ELSE,
     TOKEN_DO,
@@ -49,7 +50,6 @@ typedef enum {
     TOKEN_TRUE,
     TOKEN_FALSE,
     TOKEN_NULL,
-    TOKEN_THIS,
     TOKEN_NEW
 } TokenType;
 

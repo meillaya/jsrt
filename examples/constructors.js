@@ -1,12 +1,11 @@
-function Box(name) {
-  this.name = name;
+function Counter(start) {
+    this.value = start;
 }
 
-Box.prototype = {
-  label: function () {
-    return "box:" + this.name;
-  }
+Counter.prototype.bump = function () {
+    this.value = this.value + 1;
+    return this.value;
 };
 
-let item = new Box("jsrt");
-item.label();
+let counter = new Counter(4);
+counter.bump() + ":" + counter.bump();

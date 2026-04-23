@@ -185,10 +185,12 @@ void run_bytecode_tests(TestContext *ctx) {
 
     {
         const char *source =
-            "function Box(name) { this.name = name; }\n"
-            "Box.prototype = {label: function () { return this.name; }};\n"
-            "let box = new Box(\"crate\");\n"
-            "box.label();\n";
+            "function Ctor(value) {\n"
+            "  this.value = value;\n"
+            "}\n"
+            "Ctor.prototype.get = function () { return this.value; };\n"
+            "let obj = new Ctor(7);\n"
+            "obj.get();\n";
         BytecodeProgram program;
         char *error = NULL;
         char *disassembly;
@@ -196,9 +198,10 @@ void run_bytecode_tests(TestContext *ctx) {
         EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
         EXPECT_TRUE(ctx, error == NULL);
         disassembly = bytecode_disassemble_program(&program);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
         EXPECT_TRUE(ctx, strstr(disassembly, "LOAD_THIS") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "ALLOC_INSTANCE") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
         free(disassembly);
         bytecode_program_free(&program);
     }

@@ -74,18 +74,7 @@ Evidence:
 - Property reads check own properties first, then continue through the prototype chain until a match is found or lookup fails.
 - Direct property writes remain receiver-only; setting `obj.name = "child"` updates or creates `obj.name` rather than mutating an inherited `name`.
 - Nested assignment may resolve intermediate containers through the prototype chain, but the final write still mutates the resolved container value rather than selecting an ancestor as the write target.
-- `this` is a real L3 value:
-  - top-level `this` evaluates to `null`
-  - `obj.method()` and `obj["method"]()` bind `this` to the original receiver object
-  - extracted/plain calls bind `this` to `null`
-- `new Ctor(args)` allocates a fresh object, uses `Ctor.prototype` when it is an object (otherwise `null`), and calls the constructor with `this` bound to that fresh instance.
-- Constructors that explicitly return an object/array/function replace the default instance; primitive or `null` returns are ignored.
-- Function property behavior is intentionally narrow in L3:
-  - `fn.prototype` / `fn["prototype"]` read the constructor prototype slot
-  - assigning `fn.prototype` accepts only object or `null`
-  - other function property reads/writes fail with runtime type diagnostics
-  - native functions expose `prototype === null`, reject `prototype` writes, and are not constructors
-- Object helpers remain own-only: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
+- Object helpers remain own-only in L2: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
 
 Evidence:
 - `include/jsrt/value.h`
@@ -93,22 +82,20 @@ Evidence:
 - `src/vm.c`
 - `src/value.c`
 
-## `this`, constructor, and bounded function-prototype baseline
+## L3 `this` / constructor baseline
 
-- Bare/top-level `this` evaluates to `null`.
-- Plain function calls and extracted methods execute with `this = null`.
-- Method calls through dot/bracket property lookup bind `this` to the evaluated receiver object.
-- `new Ctor(args...)` allocates a fresh object, binds `this` to that object, and returns either the explicit aggregate/function result or the fresh instance when the constructor returns a primitive/`null`.
-- User-defined functions expose a narrow `prototype` meta-property used by `new`; `Ctor.prototype` and `Ctor["prototype"]` read/write the same slot.
-- Function `prototype` assignment accepts only an object or `null`.
-- Non-`prototype` function property access/assignment remains explicitly unsupported and raises a runtime type diagnostic.
-- Native functions are not constructors; `new print(...)` fails with a runtime type diagnostic, `print.prototype` reads as `null`, and writes to that slot fail.
+- Bare/top-level `this` resolves to `null`.
+- Property/index calls (`obj.method()` / `obj["method"]()`) bind `this` to the evaluated receiver object, even when the function is found through the prototype chain.
+- Extracted/plain calls continue to run with `this = null`.
+- `new Ctor(args...)` allocates a fresh object, binds `this` to it for the constructor body, and applies `Ctor.prototype` when that slot is an object.
+- Constructor returns follow the bounded L3 rule: explicit object/array/function returns replace the default instance; primitive/null returns do not.
+- Function property support remains intentionally narrow: only `prototype` / `["prototype"]` is supported; other function property reads/writes fail with runtime type diagnostics.
+- Native functions are not constructors. Reading `builtin.prototype` yields `null`, writing it fails, and `new builtin(...)` raises a runtime type diagnostic.
 
 Evidence:
 - `tests/test_eval.c`
 - `tests/test_vm.c`
 - `tests/test_bytecode.c`
-- `examples/constructors.js`
 - `src/eval.c`
 - `src/compiler.c`
 - `src/vm.c`
@@ -131,7 +118,7 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- classes / class-field semantics / `super`
+- classes
 - async / event loop behavior
 - broad ECMAScript coercion compatibility
 - sparse arrays / array growth on assignment

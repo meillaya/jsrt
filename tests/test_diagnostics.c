@@ -131,14 +131,25 @@ void run_diagnostics_tests(TestContext *ctx) {
     );
     free(error);
 
-    error = parse_error_for("new Thing;");
+    error = parse_error_for("new Foo;\n");
     EXPECT_TRUE(ctx, error != NULL);
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:10: expected '(' after constructor target\n"
-        "new Thing;\n"
-        "         ^"
+        "Parser error at 1:8: expected '(' after constructor target in 'new' expression\n"
+        "new Foo;\n"
+        "       ^"
+    );
+    free(error);
+
+    error = parse_error_for("new (Foo)();\n");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:5: unsupported parenthesized constructor target in 'new' expression\n"
+        "new (Foo)();\n"
+        "    ^"
     );
     free(error);
 

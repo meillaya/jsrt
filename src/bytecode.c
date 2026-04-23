@@ -14,6 +14,7 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_POP: return "POP";
         case BC_DUP: return "DUP";
         case BC_SWAP: return "SWAP";
+        case BC_LOAD_THIS: return "LOAD_THIS";
         case BC_LOAD_LOCAL: return "LOAD_LOCAL";
         case BC_STORE_LOCAL: return "STORE_LOCAL";
         case BC_LOAD_UPVALUE: return "LOAD_UPVALUE";
@@ -42,7 +43,7 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_GET_INDEX: return "GET_INDEX";
         case BC_GET_INDEX_KEEP: return "GET_INDEX_KEEP";
         case BC_SET_INDEX: return "SET_INDEX";
-        case BC_NEW_INSTANCE: return "NEW_INSTANCE";
+        case BC_ALLOC_INSTANCE: return "ALLOC_INSTANCE";
         case BC_CALL: return "CALL";
         case BC_CALL_METHOD: return "CALL_METHOD";
         case BC_CALL_NEW: return "CALL_NEW";
@@ -127,6 +128,7 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
         case BC_LOAD_UPVALUE:
         case BC_STORE_UPVALUE:
         case BC_LOAD_THIS:
+        case BC_ALLOC_INSTANCE:
         case BC_CALL:
         case BC_CALL_METHOD:
         case BC_CALL_NEW:

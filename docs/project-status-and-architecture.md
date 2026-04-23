@@ -388,9 +388,9 @@ L2 prototype-chain lookup is now part of the bounded runtime surface. The next e
    - Layer class syntax on top of the bounded constructor/prototype runtime.
    - Keep the runtime model narrow unless syntax support proves more primitives are necessary.
 
-3. **L5 — Module system**
-   - Add import/export semantics and multi-file execution.
-   - Treat it as a separate milestone from the current single-file runtime contract.
+3. **L3 — `this` binding and constructor semantics**
+   - Define method invocation context and object construction rules.
+   - Landed as a bounded runtime surface: top-level `this = null`, receiver-aware method calls, `new Ctor(args...)`, and a narrow function `prototype` slot without classes or general function-object bags.
 
 ### Larger long-horizon targets
 

@@ -242,25 +242,109 @@ void run_eval_tests(TestContext *ctx) {
     eval_result_free(&result);
 
     result = evaluate_source(
-        "function Box(name) { this.name = name; }\n"
-        "Box.prototype = {label: function () { return this.name; }};\n"
-        "let box = new Box(\"crate\");\n"
-        "box.label();\n",
+        "let proto = {get: function () { return this.value; }};\n"
+        "let obj = {value: 11};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.get() + obj[\"get\"]();\n",
         &error
     );
     EXPECT_FALSE(ctx, result.had_error);
-    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
-    EXPECT_STRING_EQ(ctx, result.value.as.string, "crate");
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 22.0);
     value_free(result.value);
     eval_result_free(&result);
 
     result = evaluate_source(
-        "function Box() {}\n"
-        "Box.extra;\n",
+        "let obj = {value: 11, get: function () { return this == null; }};\n"
+        "let extracted = obj.get;\n"
+        "extracted();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Ctor(value) {\n"
+        "  this.value = value;\n"
+        "}\n"
+        "Ctor.prototype.get = function () { return this.value; };\n"
+        "let instance = new Ctor(9);\n"
+        "instance.get();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 9.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function PrimitiveReturn() {\n"
+        "  this.value = 4;\n"
+        "  return 99;\n"
+        "}\n"
+        "let instance = new PrimitiveReturn();\n"
+        "instance.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 4.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function ObjectReturn() {\n"
+        "  this.value = 4;\n"
+        "  return {value: 12};\n"
+        "}\n"
+        "let instance = new ObjectReturn();\n"
+        "instance.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 12.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Ctor() {}\n"
+        "Ctor[\"prototype\"] = {answer: 8};\n"
+        "let instance = new Ctor();\n"
+        "instance.answer;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 8.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Ctor() {}\n"
+        "Ctor.prototype = 3;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function prototype must be an object or null") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Ctor() {}\n"
+        "Ctor.extra;\n",
         &error
     );
     EXPECT_TRUE(ctx, result.had_error);
     EXPECT_TRUE(ctx, strstr(result.error_message, "function property access only supports 'prototype'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("new len(\"abc\");\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "attempted to construct a non-constructor value") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source("len(\"hello\");\n", &error);

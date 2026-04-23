@@ -126,48 +126,7 @@ static Stmt *parse_declaration(Parser *parser);
 static Stmt *parse_statement(Parser *parser);
 static Expr *parse_assignment(Parser *parser);
 static Stmt *parse_var_declaration(Parser *parser, bool is_const);
-static Expr *parse_property_index_chain(Parser *parser, Expr *expr);
-
-static Expr *finish_call(Parser *parser, Expr *callee, const Token *open) {
-    ExprArray arguments;
-    expr_array_init(&arguments);
-    if (!check(parser, TOKEN_RIGHT_PAREN)) {
-        do {
-            Expr *argument = parse_expression(parser);
-            if (argument == NULL) {
-                expr_array_free(&arguments);
-                expr_destroy(callee);
-                return NULL;
-            }
-            expr_array_push(&arguments, argument);
-        } while (match(parser, TOKEN_COMMA));
-    }
-    if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after arguments")) {
-        expr_array_free(&arguments);
-        expr_destroy(callee);
-        return NULL;
-    }
-    return ast_new_call(callee, arguments, open->line, open->column);
-}
-
-static bool parse_argument_list(Parser *parser, ExprArray *arguments, const char *error_message) {
-    expr_array_init(arguments);
-    if (!check(parser, TOKEN_RIGHT_PAREN)) {
-        do {
-            Expr *argument = parse_expression(parser);
-            if (argument == NULL) {
-                expr_array_free(arguments);
-                return false;
-            }
-            expr_array_push(arguments, argument);
-        } while (match(parser, TOKEN_COMMA));
-    }
-    if (!consume(parser, TOKEN_RIGHT_PAREN, error_message)) {
-        expr_array_free(arguments);
-        return false;
-    }
-    return true;
-}
+static Expr *parse_new_expression(Parser *parser);
 
 static Expr *parse_function_expression(Parser *parser) {
     const Token *keyword = previous(parser);
@@ -321,6 +280,10 @@ static Expr *parse_primary(Parser *parser) {
     if (match(parser, TOKEN_IDENTIFIER)) {
         token = previous(parser);
         return ast_new_identifier(token->lexeme, token->line, token->column);
+    }
+    if (match(parser, TOKEN_THIS)) {
+        token = previous(parser);
+        return ast_new_this(token->line, token->column);
     }
     if (match(parser, TOKEN_FUNCTION)) {
         return parse_function_expression(parser);
@@ -481,62 +444,66 @@ static Expr *parse_postfix(Parser *parser) {
     return expr;
 }
 
-static Expr *parse_new_expression(Parser *parser) {
-    const Token *keyword = previous(parser);
-    Expr *callee = NULL;
-    ExprArray arguments;
+static Expr *parse_new_target(Parser *parser) {
+    Expr *expr = NULL;
 
-    expr_array_init(&arguments);
-    if (match(parser, TOKEN_NUMBER)) {
-        callee = ast_new_literal_number(previous(parser)->number, previous(parser)->line, previous(parser)->column);
-    } else if (match(parser, TOKEN_STRING)) {
-        callee = ast_new_literal_string(previous(parser)->lexeme, previous(parser)->line, previous(parser)->column);
-    } else if (match(parser, TOKEN_TRUE)) {
-        callee = ast_new_literal_bool(true, previous(parser)->line, previous(parser)->column);
-    } else if (match(parser, TOKEN_FALSE)) {
-        callee = ast_new_literal_bool(false, previous(parser)->line, previous(parser)->column);
-    } else if (match(parser, TOKEN_NULL)) {
-        callee = ast_new_literal_null(previous(parser)->line, previous(parser)->column);
-    } else if (match(parser, TOKEN_THIS)) {
-        callee = ast_new_this(previous(parser)->line, previous(parser)->column);
-    } else if (match(parser, TOKEN_IDENTIFIER)) {
-        callee = ast_new_identifier(previous(parser)->lexeme, previous(parser)->line, previous(parser)->column);
-    } else {
-        set_error(parser, peek(parser), "expected constructor target after 'new'");
+    if (check(parser, TOKEN_LEFT_PAREN)) {
+        set_error(parser, peek(parser), "unsupported parenthesized constructor target in 'new' expression");
         return NULL;
     }
+
+    expr = parse_primary(parser);
+    if (expr == NULL) {
+        return NULL;
+    }
+
     for (;;) {
         if (match(parser, TOKEN_LEFT_BRACKET)) {
             const Token *open = previous(parser);
             Expr *index = parse_expression(parser);
             if (index == NULL) {
-                expr_destroy(callee);
+                expr_destroy(expr);
                 return NULL;
             }
-            if (!consume(parser, TOKEN_RIGHT_BRACKET, "expected ']' after index expression")) {
+            if (!consume(parser, TOKEN_RIGHT_BRACKET, "expected ']' after constructor index expression")) {
+                expr_destroy(expr);
                 expr_destroy(index);
-                expr_destroy(callee);
                 return NULL;
             }
-            callee = ast_new_index(callee, index, open->line, open->column);
+            expr = ast_new_index(expr, index, open->line, open->column);
             continue;
         }
         if (match(parser, TOKEN_DOT)) {
             const Token *dot = previous(parser);
             if (!consume(parser, TOKEN_IDENTIFIER, "expected property name after '.'")) {
-                expr_destroy(callee);
+                expr_destroy(expr);
                 return NULL;
             }
-            callee = ast_new_property(callee, previous(parser)->lexeme, dot->line, dot->column);
+            expr = ast_new_property(expr, previous(parser)->lexeme, dot->line, dot->column);
             continue;
         }
         break;
+    }
+
+    return expr;
+}
+
+static Expr *parse_new_expression(Parser *parser) {
+    const Token *keyword = previous(parser);
+    Expr *callee;
+    ExprArray arguments;
+
+    callee = parse_new_target(parser);
+    if (callee == NULL) {
+        return NULL;
     }
 
     if (!consume(parser, TOKEN_LEFT_PAREN, "expected '(' after constructor target in 'new' expression")) {
         expr_destroy(callee);
         return NULL;
     }
+
+    expr_array_init(&arguments);
     if (!check(parser, TOKEN_RIGHT_PAREN)) {
         do {
             Expr *argument = parse_expression(parser);
@@ -548,6 +515,7 @@ static Expr *parse_new_expression(Parser *parser) {
             expr_array_push(&arguments, argument);
         } while (match(parser, TOKEN_COMMA));
     }
+
     if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after constructor arguments")) {
         expr_array_free(&arguments);
         expr_destroy(callee);

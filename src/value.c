@@ -353,8 +353,8 @@ void value_mark_reachable(Value value) {
                 return;
             }
             value.as.function->gc.marked = true;
-            if (value.as.function->prototype_slot != NULL) {
-                object_mark_reachable(value.as.function->prototype_slot);
+            if (value.as.function->prototype_object != NULL) {
+                object_mark_reachable(value.as.function->prototype_object);
             }
             {
                 size_t i;
