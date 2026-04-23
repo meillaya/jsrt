@@ -5,6 +5,7 @@
 #include "jsrt/ast.h"
 #include "jsrt/compiler.h"
 #include "jsrt/eval.h"
+#include "jsrt/gc.h"
 #include "jsrt/lexer.h"
 #include "jsrt/parser.h"
 #include "jsrt/vm.h"
@@ -102,7 +103,16 @@ static EvalResult eval_vm_source(const char *source, char **error_message) {
 static void assert_backend_parity(TestContext *ctx, const char *source) {
     char *error = NULL;
     EvalResult tree = eval_treewalk_source(source, &error);
-    EvalResult vm = eval_vm_source(source, &error);
+    EvalResult vm;
+    GcTempRoot tree_root;
+
+    if (!tree.had_error) {
+        gc_temp_root_push_value(&tree_root, &tree.value);
+    }
+    vm = eval_vm_source(source, &error);
+    if (!tree.had_error) {
+        gc_temp_root_pop(&tree_root);
+    }
 
     EXPECT_FALSE(ctx, tree.had_error);
     EXPECT_FALSE(ctx, vm.had_error);
@@ -118,7 +128,16 @@ static void assert_backend_parity(TestContext *ctx, const char *source) {
 static void assert_backend_error_contains(TestContext *ctx, const char *source, const char *expected_substring) {
     char *error = NULL;
     EvalResult tree = eval_treewalk_source(source, &error);
-    EvalResult vm = eval_vm_source(source, &error);
+    EvalResult vm;
+    GcTempRoot tree_root;
+
+    if (!tree.had_error) {
+        gc_temp_root_push_value(&tree_root, &tree.value);
+    }
+    vm = eval_vm_source(source, &error);
+    if (!tree.had_error) {
+        gc_temp_root_pop(&tree_root);
+    }
 
     EXPECT_TRUE(ctx, tree.had_error);
     EXPECT_TRUE(ctx, vm.had_error);
@@ -137,7 +156,16 @@ static void assert_backend_error_contains(TestContext *ctx, const char *source, 
 static void assert_backend_value_text(TestContext *ctx, const char *source, const char *expected_text) {
     char *error = NULL;
     EvalResult tree = eval_treewalk_source(source, &error);
-    EvalResult vm = eval_vm_source(source, &error);
+    EvalResult vm;
+    GcTempRoot tree_root;
+
+    if (!tree.had_error) {
+        gc_temp_root_push_value(&tree_root, &tree.value);
+    }
+    vm = eval_vm_source(source, &error);
+    if (!tree.had_error) {
+        gc_temp_root_pop(&tree_root);
+    }
 
     EXPECT_FALSE(ctx, tree.had_error);
     EXPECT_FALSE(ctx, vm.had_error);
