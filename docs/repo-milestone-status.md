@@ -27,7 +27,7 @@ Document-role boundaries:
 | N5 — Function expressions and anonymous closures | DONE | Evidence | `README.md`; `examples/function_expressions.js`; `docs/project-status-and-architecture.md`; `tests/test_eval.c` | Function expressions and closures are part of the current supported surface. |
 | N6 — `const` and declaration-rule refinement | DONE | Evidence | `README.md`; `examples/const.js`; `tests/test_eval.c`; `tests/test_parser.c` | `const` is part of the current supported surface with rule coverage. |
 | N7 — General heap GC architecture spike | DONE | Evidence | `.omx/plans/adr-javascript-runtime-n7-general-heap-gc.md`; `.omx/plans/test-spec-javascript-runtime-roadmap-n7-general-heap-gc-spike.md` | Design/ADR milestone: accepted direction artifact exists and explicitly hands off to N8. |
-| N8 — General heap GC MVP | DONE | Evidence | `docs/project-status-and-architecture.md`; `docs/n8-general-heap-gc-mvp-notes.md`; `src/gc.c`; `include/jsrt/gc.h`; `examples/gc_stress.js` | Current-state docs and runtime code explicitly describe and implement the bounded managed-heap path for `Env`, `JsFunction`, `JsArray`, and `JsObject`. |
+| N8 — General heap GC MVP | DONE | Evidence | `docs/project-status-and-architecture.md`; `docs/milestone-verification-checklist.md`; `docs/n8-general-heap-gc-mvp-notes.md`; `src/gc.c`; `include/jsrt/gc.h`; `examples/gc_stress.js` | Current-state docs and runtime code explicitly describe and implement the bounded managed-heap path for `Env`, `JsFunction`, `JsArray`, and `JsObject`, and the checklist now contains an explicit N8 closure record. |
 | M1 — GC observability and stress rig | DONE | Evidence | `docs/gc-observability-and-stress.md`; `include/jsrt/gc.h`; `examples/gc_stress.js` | GC counters, trace mode, and stress coverage are documented and implemented. |
 | M2 — Aggregate semantics ADR (`copy` vs `reference`) | DONE | Evidence | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md`; `docs/aggregate-semantics-adr.md` | Design/ADR milestone: the decision artifact exists. Some companion wording is now stale; see appendix below. |
 | M3 — Mutable aggregate/reference model implementation | DONE | Evidence | `docs/semantics-baseline.md`; `docs/project-status-and-architecture.md`; `examples/references.js`; `tests/test_eval.c` | Current baseline explicitly says arrays/objects preserve shared identity and alias-visible mutation. |
@@ -58,6 +58,7 @@ These milestones have a repo-local artifact that directly records completion or 
 | Milestone | Explicit closure artifact | Notes |
 |---|---|---|
 | N7 — General heap GC architecture spike | `.omx/plans/adr-javascript-runtime-n7-general-heap-gc.md` | ADR says it is **accepted for roadmap handoff to N8**, which is the completion artifact for this design milestone. |
+| N8 — General heap GC MVP | `docs/milestone-verification-checklist.md` | Contains the **N8 closure record — 2026-04-23** with retained managed-heap/stress/ASan evidence for the bounded N8 surface. |
 | M2 — Aggregate semantics ADR (`copy` vs `reference`) | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md` | ADR says it is **accepted for roadmap handoff to M3**, which is the completion artifact for this design milestone. |
 | M6 — Bytecode / IR architecture spike | `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | ADR says it is **accepted for roadmap handoff to M7/M8**, which is the completion artifact for this design milestone. |
 | M8 — VM interpreter parity backend | `docs/milestone-verification-checklist.md` | Contains the **M8 closure record — 2026-04-23** with retained parity/backend-switch/ASan evidence for the original bounded M8 surface. |
@@ -67,7 +68,7 @@ These milestones have a repo-local artifact that directly records completion or 
 
 These milestones are marked `DONE` because the current repo clearly ships their bounded surface, but there is no single dedicated closure record currently serving as the milestone’s canonical completion artifact:
 
-`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N8`, `M1`, `M3`, `M4`, `M5`, `M7`, `M9`, `M10`, `L1`, `L2`, `L3`
+`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M1`, `M3`, `M4`, `M5`, `M7`, `M9`, `M10`, `L1`, `L2`, `L3`
 
 For these rows, the ledger relies on the cited current-state docs, examples, tests, and implementation files rather than a standalone milestone-closure record.
 

@@ -207,3 +207,58 @@ This closure record applies to the **initial bounded M8 subset**. Later mileston
 - Keep tree-walk as the semantic oracle unless broader parity evidence justifies any future promotion.
 - Treat later VM widening (`M9`, `M10`) as distinct follow-on closure work rather than retroactively inflating M8.
 - Keep unsupported backend surface explicit until it is truly parity-tested.
+
+## N8 closure record — 2026-04-23
+
+This section formally closes the bounded **N8 — General Heap GC MVP** milestone against its approved PRD/test-spec and the retained repo evidence below.
+
+This closure record applies to the bounded managed-heap MVP, not to a hypothetical universal GC for every allocation in the process. The closure should be read together with the documented guardrail that N8 stayed intentionally narrower than full heap-management ambitions.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `./build/jsrt examples/gc_stress.js` → `85`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1035 assertions`
+- Current-facing milestone companion and contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-n8-general-heap-gc-mvp.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-n8-general-heap-gc-mvp.md`
+  - `docs/n8-general-heap-gc-mvp-notes.md`
+- Current runtime evidence for the bounded managed path is retained in:
+  - `include/jsrt/gc.h`
+  - `src/gc.c`
+  - `src/eval.c`
+  - `src/value.c`
+  - `examples/gc_stress.js`
+
+### Changed files in the N8 milestone implementation
+
+The original N8 implementation diff is not cleanly recoverable as one single historical commit from the current rewritten repository history. The current authoritative implementation surface for the landed N8 milestone is:
+
+- `.omx/plans/prd-javascript-runtime-roadmap-n8-general-heap-gc-mvp.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-n8-general-heap-gc-mvp.md`
+- `docs/n8-general-heap-gc-mvp-notes.md`
+- `docs/project-status-and-architecture.md`
+- `include/jsrt/gc.h`
+- `src/gc.c`
+- `src/eval.c`
+- `src/value.c`
+- `examples/gc_stress.js`
+- `tests/test_eval.c`
+
+### Simplifications made
+
+- Kept N8 bounded to managed runtime objects (`Env`, `JsFunction`, `JsArray`, `JsObject`) instead of widening into full-process ownership.
+- Reused explicit evaluator safe points and temporary roots instead of switching to conservative stack scanning or allocation-triggered collection.
+- Preserved then-current language semantics while moving ownership onto the bounded managed path.
+
+### Remaining risks
+
+- N8 is not universal/full heap GC and should not be read as such.
+- Frontend/manual objects such as AST nodes, source buffers, tokens, and diagnostic buffers remain outside the managed path.
+- Later runtime work still needs to respect the bounded-temp-root model and the explicit object-family boundary unless a new design milestone says otherwise.
+
+### Milestone-specific follow-ups
+
+- Keep N8 documentation explicit that it is a bounded managed-heap MVP, not broad/full heap collection.
+- Treat later GC observability, aggregate-semantics, and backend-planning work as follow-on milestones rather than retroactively widening N8.
+- Do not widen ownership scope without revisiting the N7/N8 ADR + PRD constraints.
