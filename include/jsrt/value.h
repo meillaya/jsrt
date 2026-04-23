@@ -18,6 +18,7 @@ typedef struct Value Value;
 typedef struct JsFunction {
     GcHeader gc;
     bool is_native;
+    bool is_constructor;
     const struct Stmt *declaration;
     const struct Expr *expression;
     Env *closure;
@@ -25,6 +26,7 @@ typedef struct JsFunction {
     const char *native_name;
     size_t native_arity;
     const struct BytecodeFunction *bytecode;
+    JsObject *prototype_slot;
     Value *captures;
     size_t capture_count;
     JsObject *prototype_object;

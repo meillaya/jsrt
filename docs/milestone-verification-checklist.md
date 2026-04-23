@@ -43,17 +43,20 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 - [ ] `docs/semantics-baseline.md` is updated to describe the bounded L2 surface, while keeping `this` / `new` / constructors / classes deferred to L3
 - [ ] the ASan lane is re-run after the final object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
-## L3 `this` binding / constructor exit gates
+## L3 `this` / constructor exit gates
 
-Use this addendum when verifying the bounded L3 milestone. L3 is done only when receiver binding and constructor semantics land **without** bleeding into L4 class syntax or general function-object semantics.
+Use this addendum when verifying the bounded L3 milestone.
 
-- [ ] `this` and bounded parenthesized `new` syntax are parser-covered, including recovery/diagnostics for malformed or out-of-scope `new` forms
-- [ ] bare/top-level/plain/extracted calls keep `this = null`, while `obj.method()` and `obj["method"]()` bind `this` to the concrete receiver, including prototype-inherited methods
-- [ ] `new Ctor(args)` allocates a fresh instance, uses `Ctor.prototype` / `Ctor["prototype"]` when that slot is an object, and preserves the default instance when the constructor returns a primitive or `null`
-- [ ] non-constructable targets, native functions, invalid constructor-`prototype` writes, and non-`prototype` function property access/assignment fail with targeted runtime type diagnostics
-- [ ] evaluator and VM suites cover the same supported positive/negative cases, including evaluation-order guards and bytecode evidence for plain, method, and constructor call lowering
-- [ ] at least one example demonstrates constructor + prototype-method interaction, and the docs diff keeps L4 classes / broader function-object semantics explicitly deferred
-- [ ] the ASan lane is re-run after the final function/object-graph changes land, and the exact command/result are captured in the completion evidence bundle
+- [ ] top-level `this` is explicitly verified as `null`
+- [ ] `obj.method()` and `obj["method"]()` bind `this` to the receiver, including prototype-inherited methods
+- [ ] extracted/plain calls keep `this = null`
+- [ ] `new Ctor(args)` allocates an instance, binds `this`, and applies constructor writes to that instance
+- [ ] constructor return replacement rules are verified for aggregate/function returns vs primitive/null returns
+- [ ] `Ctor.prototype` / `Ctor["prototype"]` reads and writes are verified, including invalid non-object/non-null assignment failures
+- [ ] non-`prototype` function property access/assignment is rejected with runtime type diagnostics
+- [ ] native functions are explicitly verified as non-constructors with `prototype === null` and rejected `prototype` writes
+- [ ] bytecode/evaluator/VM coverage all include receiver-aware calls and constructor calls
+- [ ] at least one example program demonstrates constructor + prototype-method behavior
 
 ## Design-heavy milestones
 

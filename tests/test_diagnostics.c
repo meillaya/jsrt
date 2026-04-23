@@ -131,6 +131,17 @@ void run_diagnostics_tests(TestContext *ctx) {
     );
     free(error);
 
+    error = parse_error_for("new Thing;");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:10: expected '(' after constructor target\n"
+        "new Thing;\n"
+        "         ^"
+    );
+    free(error);
+
     error = parse_error_for(
         "let broken = [1, 2;\n"
         "while nope { let x = 1; }\n"
@@ -235,15 +246,18 @@ void run_diagnostics_tests(TestContext *ctx) {
     }
 
     {
-        EvalResult result = eval_result_for("let ctor = 1;\nnew ctor(2);\n");
+        EvalResult result = eval_result_for(
+            "function Box() {}\n"
+            "Box.extra;\n"
+        );
         EXPECT_TRUE(ctx, result.had_error);
         EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_TYPE);
         EXPECT_STRING_EQ(
             ctx,
             result.error_message,
-            "Runtime error [type] at 2:1: new expects a constructor function\n"
-            "new ctor(2);\n"
-            "^"
+            "Runtime error [type] at 2:4: function property access only supports 'prototype'\n"
+            "Box.extra;\n"
+            "   ^"
         );
         eval_result_free(&result);
     }

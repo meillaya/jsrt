@@ -136,6 +136,9 @@ static void gc_sweep_env(Env *env) {
         entry = next;
     }
 
+    if (env->has_this) {
+        value_release_reference(env->this_value);
+    }
     free(env);
 }
 

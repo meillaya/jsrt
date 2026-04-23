@@ -44,9 +44,7 @@ typedef enum {
     BC_NEW_INSTANCE,
     BC_CALL,
     BC_CALL_METHOD,
-    BC_MAKE_INSTANCE,
     BC_CALL_NEW,
-    BC_LOAD_THIS,
     BC_MAKE_FUNCTION,
     BC_RETURN
 } BytecodeOp;

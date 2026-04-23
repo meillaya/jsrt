@@ -17,7 +17,7 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 | Booleans | `true`/`false`, truthiness in control flow | `tests/test_eval.c`, `examples/branching.js` |
 | Null | `null` literal; falsy; final `null` is not printed by CLI | `src/main.c`, evaluator behavior |
 | Strings | string literals with basic escapes, concatenation with `+`, equality | `tests/test_lexer.c`, `tests/test_eval.c`, `examples/strings.js` |
-| Functions | declarations, calls, closures, `return` | `tests/test_eval.c`, `examples/functions.js` |
+| Functions | declarations, calls, closures, `return`, receiver-bound `this`, bounded constructor `prototype` slots, and `new Ctor(args)` construction | `tests/test_eval.c`, `tests/test_vm.c`, `examples/functions.js`, `examples/constructors.js` |
 | Arrays | literals, indexing, equality by deep element comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
 | Objects | literals, dot/bracket access, explicit prototype linkage via `setPrototypeOf`, own-first then prototype-chain lookup, equality by ordered own key/value comparison | `tests/test_eval.c`, `src/eval.c`, `src/vm.c`, `src/value.c`, `examples/arrays_objects.js` |
 
@@ -57,7 +57,7 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 - Object reads search own properties first, then walk the explicit prototype chain until a match is found or the chain ends.
 - Object writes remain receiver-local on the final write step; they do not climb the prototype chain to rewrite ancestors.
 - Inherited intermediate containers may still be resolved through prototypes during nested assignment (for example `obj.nested.value = 1` may mutate the inherited `nested` object).
-- Function values found through object property lookup are still called as plain functions; this milestone does **not** add implicit receiver / `this` binding, constructor invocation, or function-level `prototype` behavior.
+- Function values found through object property lookup now receive the original receiver as `this`; extracted/plain calls still use `this = null`.
 - Array assignment is in-bounds only.
 - Function argument passing and returns preserve aggregate identity instead of de-aliasing arrays/objects.
 - Array assignment is in-bounds only.
@@ -67,16 +67,25 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 Evidence:
 - `tests/test_eval.c` covers alias-visible mutation, nested assignment, function-call/reference flow, property creation, cycle-safe output/equality, and array assignment bounds.
 
-## Prototype-chain / method-dispatch baseline
+## Prototype-chain / `this` / constructor baseline
 
 - Objects now carry an optional prototype reference.
 - Prototype linkage is explicit through `setPrototypeOf(obj, protoOrNull)`; there is no object-literal `__proto__` syntax.
 - Property reads check own properties first, then continue through the prototype chain until a match is found or lookup fails.
 - Direct property writes remain receiver-only; setting `obj.name = "child"` updates or creates `obj.name` rather than mutating an inherited `name`.
 - Nested assignment may resolve intermediate containers through the prototype chain, but the final write still mutates the resolved container value rather than selecting an ancestor as the write target.
-- `obj.method()` remains bounded L2 behavior: property lookup may find the function through the prototype chain, but the call still behaves like an ordinary function call with no implicit `this` binding.
-- Function values are not object-like in the L2 baseline: no constructor calls, no `prototype` meta-property, and no arbitrary function property access are part of the supported surface yet.
-- Object helpers remain own-only in L2: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
+- `this` is a real L3 value:
+  - top-level `this` evaluates to `null`
+  - `obj.method()` and `obj["method"]()` bind `this` to the original receiver object
+  - extracted/plain calls bind `this` to `null`
+- `new Ctor(args)` allocates a fresh object, uses `Ctor.prototype` when it is an object (otherwise `null`), and calls the constructor with `this` bound to that fresh instance.
+- Constructors that explicitly return an object/array/function replace the default instance; primitive or `null` returns are ignored.
+- Function property behavior is intentionally narrow in L3:
+  - `fn.prototype` / `fn["prototype"]` read the constructor prototype slot
+  - assigning `fn.prototype` accepts only object or `null`
+  - other function property reads/writes fail with runtime type diagnostics
+  - native functions expose `prototype === null`, reject `prototype` writes, and are not constructors
+- Object helpers remain own-only: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
 
 Evidence:
 - `include/jsrt/value.h`
@@ -122,8 +131,7 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- receiver-bound `this`, constructor calls via `new`, and function-level `prototype` meta-properties
-- classes / `super` / desugaring
+- classes / class-field semantics / `super`
 - async / event loop behavior
 - broad ECMAScript coercion compatibility
 - sparse arrays / array growth on assignment

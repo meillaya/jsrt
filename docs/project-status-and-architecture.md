@@ -295,8 +295,7 @@ The project is intentionally incomplete. That is a feature, not a flaw, because 
 
 Still outside scope today:
 - modules and multi-file execution
-- receiver-bound `this`, constructor calls via `new`, and bounded function `prototype` semantics
-- classes / `super` / class desugaring
+- classes / `super` / class-field semantics
 - async/event loop semantics
 - broad ECMAScript coercion and compatibility
 - JIT or optimization passes
@@ -385,13 +384,13 @@ L2 prototype-chain lookup is now part of the bounded runtime surface. The next e
    - Add a repeatable performance corpus and measurement harness.
    - Establish baseline numbers before optimization or architecture expansion.
 
-2. **L3 — `this` binding and constructor semantics**
-   - Define receiver binding, parenthesized `new`, and bounded constructor/prototype behavior on top of the landed L2 prototype model.
-   - Keep native functions non-constructable and defer classes / broader function-object semantics to later milestones.
+2. **L4 — Class syntax and desugaring/direct support**
+   - Layer class syntax on top of the bounded constructor/prototype runtime.
+   - Keep the runtime model narrow unless syntax support proves more primitives are necessary.
 
-3. **L4 — class syntax and desugaring/direct support**
-   - Layer class syntax only after L3 locks the constructor/prototype runtime model.
-   - Reuse the bounded L3 constructor surface instead of inventing a parallel OO mechanism.
+3. **L5 — Module system**
+   - Add import/export semantics and multi-file execution.
+   - Treat it as a separate milestone from the current single-file runtime contract.
 
 ### Larger long-horizon targets
 

@@ -467,28 +467,47 @@ static bool compile_assignment_target_container_and_key(Compiler *compiler, cons
     }
 }
 
-static bool compile_method_call_target(Compiler *compiler, const Expr *callee, char **error_message) {
+static bool compile_call_callee(
+    Compiler *compiler,
+    const Expr *callee,
+    bool preserve_receiver,
+    char **error_message
+) {
     switch (callee->kind) {
         case EXPR_PROPERTY:
             if (!compile_expression(compiler, callee->as.property.target, error_message)) {
                 return false;
+            }
+            if (preserve_receiver) {
+                emit_instruction(compiler->function, BC_DUP, 0);
             }
             emit_instruction(
                 compiler->function,
                 BC_CONST,
                 add_constant(compiler->function, value_string(callee->as.property.name))
             );
-            emit_instruction(compiler->function, BC_GET_INDEX_KEEP, 0);
+            emit_instruction(compiler->function, BC_GET_INDEX, 0);
+            if (preserve_receiver) {
+                emit_instruction(compiler->function, BC_SWAP, 0);
+            }
             return true;
         case EXPR_INDEX:
-            if (!compile_expression(compiler, callee->as.index.target, error_message) ||
-                !compile_expression(compiler, callee->as.index.index, error_message)) {
+            if (!compile_expression(compiler, callee->as.index.target, error_message)) {
                 return false;
             }
-            emit_instruction(compiler->function, BC_GET_INDEX_KEEP, 0);
+            if (preserve_receiver) {
+                emit_instruction(compiler->function, BC_DUP, 0);
+            }
+            if (!compile_expression(compiler, callee->as.index.index, error_message)) {
+                return false;
+            }
+            emit_instruction(compiler->function, BC_GET_INDEX, 0);
+            if (preserve_receiver) {
+                emit_instruction(compiler->function, BC_SWAP, 0);
+            }
             return true;
         default:
-            return false;
+            return compile_expression(compiler, callee, error_message);
     }
 }
 
@@ -569,11 +588,11 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             emit_instruction(compiler->function, BC_SET_INDEX, 0);
             return true;
         case EXPR_CALL:
-            if ((expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX)) {
-                if (!compile_method_call_target(compiler, expr->as.call.callee, error_message)) {
-                    return false;
-                }
-            } else if (!compile_expression(compiler, expr->as.call.callee, error_message)) {
+            if (!compile_call_callee(
+                    compiler,
+                    expr->as.call.callee,
+                    expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX,
+                    error_message)) {
                 return false;
             }
             for (i = 0; i < expr->as.call.arguments.count; ++i) {
@@ -583,17 +602,16 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             }
             emit_instruction(
                 compiler->function,
-                (expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX)
+                expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX
                     ? BC_CALL_METHOD
                     : BC_CALL,
                 (int)expr->as.call.arguments.count
             );
             return true;
         case EXPR_NEW:
-            if (!compile_expression(compiler, expr->as.new_expr.callee, error_message)) {
+            if (!compile_call_callee(compiler, expr->as.new_expr.callee, false, error_message)) {
                 return false;
             }
-            emit_instruction(compiler->function, BC_MAKE_INSTANCE, 0);
             for (i = 0; i < expr->as.new_expr.arguments.count; ++i) {
                 if (!compile_expression(compiler, expr->as.new_expr.arguments.items[i], error_message)) {
                     return false;

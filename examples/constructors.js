@@ -1,20 +1,12 @@
-let proto = {
-  get: function () {
-    return this.value;
+function Box(name) {
+  this.name = name;
+}
+
+Box.prototype = {
+  label: function () {
+    return "box:" + this.name;
   }
 };
 
-function Box(value) {
-  this.value = value;
-}
-
-Box.prototype = proto;
-
-function Replace() {
-  return {value: 9};
-}
-
-let box = new Box(7);
-let replacement = new Replace();
-
-print(box.get() + ":" + replacement.value + ":" + (this == null));
+let item = new Box("jsrt");
+item.label();

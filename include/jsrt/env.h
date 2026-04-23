@@ -16,6 +16,8 @@ typedef struct Env {
     GcHeader gc;
     struct Env *parent;
     EnvEntry *head;
+    bool has_this;
+    Value this_value;
 } Env;
 
 typedef enum {
@@ -30,6 +32,8 @@ void env_destroy_all(void);
 bool env_define(Env *env, const char *name, Value value, bool is_const);
 EnvAssignResult env_assign(Env *env, const char *name, Value value);
 bool env_get(const Env *env, const char *name, Value *out_value);
+void env_set_this(Env *env, Value value);
+bool env_get_this(const Env *env, Value *out_value);
 
 void env_mark_reachable(Env *env);
 

@@ -235,6 +235,34 @@ void run_eval_tests(TestContext *ctx) {
     value_free(result.value);
     eval_result_free(&result);
 
+    result = evaluate_source("this;\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box(name) { this.name = name; }\n"
+        "Box.prototype = {label: function () { return this.name; }};\n"
+        "let box = new Box(\"crate\");\n"
+        "box.label();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "crate");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box() {}\n"
+        "Box.extra;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function property access only supports 'prototype'") != NULL);
+    eval_result_free(&result);
+
     result = evaluate_source("len(\"hello\");\n", &error);
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
