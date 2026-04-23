@@ -312,3 +312,51 @@ This closure record applies to the repo’s bounded shared-reference aggregate m
 - Keep later aggregate work explicit about whether it changes equality, stringification, or host-facing mutation semantics.
 - Treat future aggregate/runtime changes as follow-on milestones rather than retroactively broadening M3.
 - Preserve cycle-safety guarantees unless a later milestone deliberately replaces them with a new tested contract.
+
+## L1 closure record — 2026-04-23
+
+This section formally closes the bounded **L1 — Benchmark and profiling harness** milestone against its approved PRD/test-spec and the retained repo evidence below.
+
+This closure record applies to the repo’s coarse end-to-end CLI timing workflow only. It does **not** claim internal phase instrumentation, portable profiler integration, or cross-machine-comparable performance numbers.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `make bench-smoke` → `bench-smoke: ok`
+- `make bench ITERATIONS=1 WARMUPS=0` → live CSV output confirming the frozen schema and tree-walk harness execution
+- `benchmarks/baseline.csv` retains a checked-in baseline using the same frozen CSV schema
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-l1-benchmark-and-profiling-harness.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-l1-benchmark-and-profiling-harness.md`
+  - `docs/benchmark-and-profiling-harness.md`
+
+### Changed files in the L1 milestone implementation
+
+- `Makefile`
+- `benchmarks/aggregates.js`
+- `benchmarks/arithmetic_control.js`
+- `benchmarks/baseline.csv`
+- `benchmarks/calls_closures.js`
+- `benchmarks/gc_churn.js`
+- `benchmarks/manifest.csv`
+- `benchmarks/vm_subset.js`
+- `docs/benchmark-and-profiling-harness.md`
+- `scripts/benchmark.sh`
+
+### Simplifications made
+
+- Kept L1 as an external harness around the existing CLI instead of instrumenting runtime internals.
+- Froze one manifest contract and one CSV schema early so later benchmark work can compare like with like.
+- Kept performance workflow outside `make test` so timing claims stay separate from correctness.
+
+### Remaining risks
+
+- L1 numbers are same-machine relative baselines, not portable or cross-machine guarantees.
+- The benchmark workflow is intentionally coarse and should not be confused with parser/compiler/runtime phase attribution.
+- Future benchmark contract changes must preserve or explicitly version the manifest/schema surface to avoid drift.
+
+### Milestone-specific follow-ups
+
+- Preserve the manifest contract and frozen CSV header unless intentionally versioning the benchmark workflow.
+- Treat deeper profiling/instrumentation as later work rather than retroactively widening L1.
+- Keep timing assertions out of `make test` unless a future milestone explicitly changes that process contract.

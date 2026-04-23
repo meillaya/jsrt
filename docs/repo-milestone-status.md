@@ -38,7 +38,7 @@ Document-role boundaries:
 | M8 — VM interpreter parity backend | DONE | Evidence | `docs/vm-parity-backend.md`; `docs/milestone-verification-checklist.md`; `README.md`; `src/vm.c`; `tests/test_vm.c` | Opt-in VM backend exists and now has an explicit closure record for the original bounded parity milestone. |
 | M9 — VM surface widening I | DONE | Evidence + Inference | `docs/vm-parity-backend.md`; `docs/project-status-and-architecture.md`; `tests/test_vm.c` | The current bounded VM subset already includes aggregate operations plus the structured control-flow gaps (`do...while`, `switch`, `break`, `continue`), so the planned M9 widening scope is now subsumed by the shipped backend surface. |
 | M10 — VM closure + function-expression parity | DONE | Evidence + Inference | `docs/vm-parity-backend.md`; `docs/project-status-and-architecture.md`; `src/compiler.c`; `tests/test_vm.c`; `tests/test_bytecode.c` | The current bounded VM/compiler surface already includes function expressions, closure capture, and upvalue lowering, so the planned M10 parity scope is now subsumed by the shipped backend surface. |
-| L1 — Benchmark and profiling harness | DONE | Evidence | `docs/benchmark-and-profiling-harness.md`; `benchmarks/manifest.csv`; `benchmarks/baseline.csv`; `scripts/benchmark.sh`; `Makefile` | Benchmark fixtures, manifest, schema, baseline CSV, script, and Make targets are all checked in. |
+| L1 — Benchmark and profiling harness | DONE | Evidence | `docs/benchmark-and-profiling-harness.md`; `docs/milestone-verification-checklist.md`; `benchmarks/manifest.csv`; `benchmarks/baseline.csv`; `scripts/benchmark.sh`; `Makefile` | Benchmark fixtures, manifest, schema, baseline CSV, script, and Make targets are all checked in, and the checklist now contains an explicit L1 closure record. |
 | L2 — Prototype chain and method dispatch | DONE | Evidence | `docs/semantics-baseline.md`; `README.md`; `src/eval.c`; `tests/test_eval.c` | Explicit prototype linkage and prototype-chain method dispatch are part of the current baseline. |
 | L3 — `this` binding and constructor semantics | DONE | Evidence | `docs/semantics-baseline.md`; `README.md`; `tests/test_eval.c`; `tests/test_vm.c` | Bounded `this`, parenthesized `new`, and constructor behavior are current support. |
 | L4 — Class syntax and desugaring/direct support | DONE | Evidence | `docs/semantics-baseline.md`; `docs/milestone-verification-checklist.md`; `examples/class_syntax.js`; `tests/test_vm.c` | Bounded class declarations are supported, and the checklist now includes a formal closure record. |
@@ -63,13 +63,14 @@ These milestones have a repo-local artifact that directly records completion or 
 | M3 — Mutable aggregate/reference model implementation | `docs/milestone-verification-checklist.md` | Contains the **M3 closure record — 2026-04-23** with retained reference-semantics/example/ASan evidence for the bounded M3 surface. |
 | M6 — Bytecode / IR architecture spike | `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | ADR says it is **accepted for roadmap handoff to M7/M8**, which is the completion artifact for this design milestone. |
 | M8 — VM interpreter parity backend | `docs/milestone-verification-checklist.md` | Contains the **M8 closure record — 2026-04-23** with retained parity/backend-switch/ASan evidence for the original bounded M8 surface. |
+| L1 — Benchmark and profiling harness | `docs/milestone-verification-checklist.md` | Contains the **L1 closure record — 2026-04-23** with retained harness/smoke/live-schema evidence for the bounded L1 workflow. |
 | L4 — Class syntax and desugaring/direct support | `docs/milestone-verification-checklist.md` | Contains the **L4 closure record — 2026-04-23** with retained evidence and checked exit gates. |
 
 ### DONE rows backed by current-state synthesis instead of a single closure artifact
 
 These milestones are marked `DONE` because the current repo clearly ships their bounded surface, but there is no single dedicated closure record currently serving as the milestone’s canonical completion artifact:
 
-`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M1`, `M4`, `M5`, `M7`, `M9`, `M10`, `L1`, `L2`, `L3`
+`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M1`, `M4`, `M5`, `M7`, `M9`, `M10`, `L2`, `L3`
 
 For these rows, the ledger relies on the cited current-state docs, examples, tests, and implementation files rather than a standalone milestone-closure record.
 
