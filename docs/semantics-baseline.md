@@ -1,6 +1,6 @@
 # jsrt Semantics Baseline
 
-This document freezes the current externally visible behavior of `jsrt` as of Roadmap milestone **N1**. It is a baseline for later milestones, not a promise of broad ECMAScript compatibility.
+This document freezes the current externally visible behavior of `jsrt` at the current roadmap state. It is a baseline for later milestones, not a promise of broad ECMAScript compatibility.
 
 ## Runtime contract
 
@@ -19,7 +19,7 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 | Strings | string literals with basic escapes, concatenation with `+`, equality | `tests/test_lexer.c`, `tests/test_eval.c`, `examples/strings.js` |
 | Functions | declarations, calls, closures, `return` | `tests/test_eval.c`, `examples/functions.js` |
 | Arrays | literals, indexing, equality by deep element comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
-| Objects | literals, dot/bracket access, explicit prototype linkage via `setPrototypeOf`, equality by ordered own key/value comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
+| Objects | literals, dot/bracket access, explicit prototype linkage via `setPrototypeOf`, own-first then prototype-chain lookup, equality by ordered own key/value comparison | `tests/test_eval.c`, `src/eval.c`, `src/vm.c`, `src/value.c`, `examples/arrays_objects.js` |
 
 ## Built-in library baseline
 
@@ -28,7 +28,7 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 | `print(value)` | writes the value's string form plus newline, returns `null` | `tests/test_eval.c`, `examples/builtins.js` |
 | `len(value)` | returns length/count for strings, arrays, and objects | `tests/test_eval.c`, `src/eval.c` |
 | `typeOf(value)` | returns stable runtime type labels | `tests/test_eval.c`, `src/eval.c` |
-| `setPrototypeOf(obj, protoOrNull)` | links an object to an object/null prototype; rejects non-object receivers, invalid prototypes, self-links, and cycles | `tests/test_eval.c`, `tests/test_vm.c`, `src/eval.c`, `src/vm.c` |
+| `setPrototypeOf(object, protoOrNull)` | sets or clears an object's prototype, returns the receiver, and rejects non-object receivers, invalid prototype values, self-links, and prototype cycles | `src/eval.c`, `src/vm.c` |
 
 ## Control flow baseline
 
@@ -66,6 +66,22 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 Evidence:
 - `tests/test_eval.c` covers alias-visible mutation, nested assignment, function-call/reference flow, property creation, cycle-safe output/equality, and array assignment bounds.
 
+## Prototype-chain / method-dispatch baseline
+
+- Objects now carry an optional prototype reference.
+- Prototype linkage is explicit through `setPrototypeOf(obj, protoOrNull)`; there is no object-literal `__proto__` syntax.
+- Property reads check own properties first, then continue through the prototype chain until a match is found or lookup fails.
+- Direct property writes remain receiver-only; setting `obj.name = "child"` updates or creates `obj.name` rather than mutating an inherited `name`.
+- Nested assignment may resolve intermediate containers through the prototype chain, but the final write still mutates the resolved container value rather than selecting an ancestor as the write target.
+- `obj.method()` remains bounded L2 behavior: property lookup may find the function through the prototype chain, but the call still behaves like an ordinary function call with no implicit `this` binding.
+- Object helpers remain own-only in L2: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
+
+Evidence:
+- `include/jsrt/value.h`
+- `src/eval.c`
+- `src/vm.c`
+- `src/value.c`
+
 ## Parser / diagnostics baseline
 
 - Parser is recursive-descent and supports aggregated syntax diagnostics after recovery to later statement boundaries.
@@ -88,26 +104,6 @@ These are not part of the current baseline:
 - broad ECMAScript coercion compatibility
 - sparse arrays / array growth on assignment
 - assignment through arbitrary non-variable roots like `makeObj().x = 1`
-
-## Roadmap L2 update guardrail
-
-When Roadmap L2 lands, this baseline should move only the bounded prototype-chain surface into the supported set:
-
-- explicit prototype linkage via the milestone-approved builtin API
-- own-first, then prototype-chain property reads
-- method dispatch as prototype-aware lookup followed by an ordinary function call
-
-The following must stay deferred to L3 even after the L2 baseline update:
-
-- implicit `this` binding
-- `new` / constructor behavior
-- classes or class syntax
-
-L2 should also keep these object-helper rules explicit in the baseline update:
-
-- direct property writes stay receiver-only
-- inherited intermediate-container assignment mutates the resolved inherited container rather than inventing an own receiver-local container
-- `len(obj)`, object equality, and object stringification remain own-property-only
 
 ## Interpretation rule for later milestones
 
