@@ -26,6 +26,7 @@ typedef struct JsFunction {
     const struct BytecodeFunction *bytecode;
     Value *captures;
     size_t capture_count;
+    JsObject *prototype_object;
 } JsFunction;
 
 typedef enum {

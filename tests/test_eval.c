@@ -1037,6 +1037,146 @@ void run_eval_tests(TestContext *ctx) {
         token_array_free(&tokens);
     }
 
+    result = evaluate_source("this == null;\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Person(name) { this.name = name; }\n"
+        "Person.prototype = {\n"
+        "  describe: function () {\n"
+        "    if (this == null) { return \"null\"; }\n"
+        "    return this.name;\n"
+        "  }\n"
+        "};\n"
+        "let ada = new Person(\"Ada\");\n"
+        "let extracted = ada.describe;\n"
+        "ada.describe() + \":\" + extracted() + \":\" + (this == null);\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "Ada:null:true");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Person(name) { this.name = name; }\n"
+        "let proto = {\n"
+        "  greet: function () { return this.name; }\n"
+        "};\n"
+        "Person.prototype = proto;\n"
+        "let ada = new Person(\"Ada\");\n"
+        "ada.greet() + \":\" + ada[\"greet\"]();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "Ada:Ada");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Keep(n) { this.n = n; return 7; }\n"
+        "function Replace() { return {ok: 9}; }\n"
+        "let kept = new Keep(4);\n"
+        "let replaced = new Replace();\n"
+        "kept.n + \":\" + replaced.ok;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "4:9");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box() {}\n"
+        "let firstProto = {label: \"first\"};\n"
+        "let secondProto = {label: \"second\"};\n"
+        "Box.prototype = firstProto;\n"
+        "let first = new Box();\n"
+        "Box[\"prototype\"] = secondProto;\n"
+        "let second = new Box();\n"
+        "Box.prototype.label + \":\" + first.label + \":\" + second.label;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "second:first:second");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let order = \"\";\n"
+        "function mark(label, value) { order = order + label; return value; }\n"
+        "let obj = {\n"
+        "  value: 0,\n"
+        "  method: function (value) { this.value = value; return this.value; }\n"
+        "};\n"
+        "function getObj() { order = order + \"b\"; return obj; }\n"
+        "getObj()[mark(\"k\", \"method\")](mark(\"a\", 7));\n"
+        "order + \":\" + obj.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "bka:7");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("let ctor = 1;\nnew ctor(2);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "new expects a constructor function") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("typeOf(print.prototype);\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "null");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("new print(1);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "native functions are not constructors") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("print.prototype = {};\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "native functions are not constructors") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box() {}\n"
+        "Box.prototype = 1;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function prototype must be an object or null") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box() {}\n"
+        "Box.extra;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function properties are limited to 'prototype' in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box() {}\n"
+        "Box[0];\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function properties are limited to 'prototype' in L3") != NULL);
+    eval_result_free(&result);
+
     assert_example_output(ctx, "examples/arithmetic.js", "7\n");
     assert_example_output(ctx, "examples/branching.js", "20\n");
     assert_example_output(ctx, "examples/functions.js", "7\n");
@@ -1048,6 +1188,7 @@ void run_eval_tests(TestContext *ctx) {
     assert_example_output(ctx, "examples/do_while.js", "8\n");
     assert_example_output(ctx, "examples/switch.js", "5\n");
     assert_example_output(ctx, "examples/function_expressions.js", "11\n");
+    assert_example_output(ctx, "examples/constructors.js", "hello Ada\n");
     assert_example_output(ctx, "examples/const.js", "7\n");
     assert_example_output(ctx, "examples/references.js", "5:9:7\n");
     assert_example_output(ctx, "examples/builtins.js", "object:5:3\n");

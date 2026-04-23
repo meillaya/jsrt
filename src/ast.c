@@ -265,6 +265,17 @@ Expr *ast_new_property(Expr *target, const char *name, int line, int column) {
     return expr;
 }
 
+Expr *ast_new_this(int line, int column) {
+    return alloc_expr(EXPR_THIS, line, column);
+}
+
+Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column) {
+    Expr *expr = alloc_expr(EXPR_NEW, line, column);
+    expr->as.new_expr.callee = callee;
+    expr->as.new_expr.arguments = arguments;
+    return expr;
+}
+
 Stmt *ast_new_expr_stmt(Expr *expression, int line, int column) {
     Stmt *stmt = alloc_stmt(STMT_EXPR, line, column);
     stmt->as.expr.expression = expression;
@@ -396,6 +407,12 @@ void expr_destroy(Expr *expr) {
         case EXPR_PROPERTY:
             expr_destroy(expr->as.property.target);
             free(expr->as.property.name);
+            break;
+        case EXPR_THIS:
+            break;
+        case EXPR_NEW:
+            expr_destroy(expr->as.new_expr.callee);
+            expr_array_free(&expr->as.new_expr.arguments);
             break;
     }
 

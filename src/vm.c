@@ -21,7 +21,11 @@ typedef struct {
     JsFunction *closure;
     const BytecodeFunction *function;
     size_t ip;
+    size_t call_base;
     size_t base;
+    Value this_value;
+    bool is_constructor;
+    Value constructor_instance;
 } VmFrame;
 
 typedef struct {
@@ -96,6 +100,20 @@ static EvalResult vm_runtime_error_take(const Vm *vm, RuntimeErrorKind kind, cha
     return result;
 }
 
+static JsObject *vm_create_object(size_t count) {
+    JsObject *object = jsrt_malloc(sizeof(*object));
+    size_t i;
+    gc_register_object(&object->gc, GC_OBJECT_OBJECT);
+    object->count = count;
+    object->items = jsrt_malloc(sizeof(*object->items) * count);
+    object->prototype = NULL;
+    for (i = 0; i < count; ++i) {
+        object->items[i].key = NULL;
+        object->items[i].value = value_null();
+    }
+    return object;
+}
+
 static void vm_free_stack(Vm *vm, size_t from_index) {
     size_t i;
     for (i = from_index; i < vm->stack_count; ++i) {
@@ -105,7 +123,12 @@ static void vm_free_stack(Vm *vm, size_t from_index) {
 }
 
 static void vm_cleanup(Vm *vm) {
+    size_t i;
     vm_free_stack(vm, 0U);
+    for (i = 0; i < vm->frame_count; ++i) {
+        value_free(vm->frames[i].this_value);
+        value_free(vm->frames[i].constructor_instance);
+    }
     free(vm->stack);
     free(vm->frames);
     if (vm->globals != NULL) {
@@ -132,7 +155,16 @@ static Value *vm_peek(Vm *vm, size_t distance) {
     return &vm->stack[vm->stack_count - 1U - distance];
 }
 
-static bool vm_push_frame(Vm *vm, JsFunction *closure, const BytecodeFunction *function, size_t base) {
+static bool vm_push_frame(
+    Vm *vm,
+    JsFunction *closure,
+    const BytecodeFunction *function,
+    size_t call_base,
+    size_t base,
+    Value this_value,
+    bool is_constructor,
+    Value constructor_instance
+) {
     size_t i;
     if (vm->frame_count == vm->frame_capacity) {
         size_t new_capacity = vm->frame_capacity == 0 ? 8U : vm->frame_capacity * 2U;
@@ -142,7 +174,11 @@ static bool vm_push_frame(Vm *vm, JsFunction *closure, const BytecodeFunction *f
     vm->frames[vm->frame_count].closure = closure;
     vm->frames[vm->frame_count].function = function;
     vm->frames[vm->frame_count].ip = 0U;
+    vm->frames[vm->frame_count].call_base = call_base;
     vm->frames[vm->frame_count].base = base;
+    vm->frames[vm->frame_count].this_value = value_clone(this_value);
+    vm->frames[vm->frame_count].is_constructor = is_constructor;
+    vm->frames[vm->frame_count].constructor_instance = value_clone(constructor_instance);
     vm->frame_count += 1U;
     for (i = function->arity; i < function->local_count; ++i) {
         vm_push(vm, value_null());
@@ -162,6 +198,7 @@ static JsFunction *vm_create_native_function(const char *name, size_t arity, VmB
     function->bytecode = NULL;
     function->captures = NULL;
     function->capture_count = 0U;
+    function->prototype_object = NULL;
     return function;
 }
 
@@ -181,6 +218,7 @@ static JsFunction *vm_create_compiled_function(const BytecodeFunction *function)
     js_function->bytecode = function;
     js_function->captures = NULL;
     js_function->capture_count = function->upvalue_count;
+    js_function->prototype_object = vm_create_object(0U);
     if (function->upvalue_count > 0U) {
         js_function->captures = jsrt_malloc(sizeof(*js_function->captures) * function->upvalue_count);
         memset(js_function->captures, 0, sizeof(*js_function->captures) * function->upvalue_count);
@@ -276,20 +314,6 @@ static JsArray *vm_create_array(size_t count) {
     return array;
 }
 
-static JsObject *vm_create_object(size_t count) {
-    JsObject *object = jsrt_malloc(sizeof(*object));
-    size_t i;
-    gc_register_object(&object->gc, GC_OBJECT_OBJECT);
-    object->count = count;
-    object->items = jsrt_malloc(sizeof(*object->items) * count);
-    object->prototype = NULL;
-    for (i = 0; i < count; ++i) {
-        object->items[i].key = NULL;
-        object->items[i].value = value_null();
-    }
-    return object;
-}
-
 static ptrdiff_t vm_object_find_key(const JsObject *object, const char *key) {
     size_t i;
     for (i = 0; i < object->count; ++i) {
@@ -331,6 +355,43 @@ static bool vm_object_lookup_key(JsObject *object, const char *key, JsObject **o
     }
 
     return false;
+}
+
+static bool vm_is_function_prototype_property(const char *key) {
+    return strcmp(key, "prototype") == 0;
+}
+
+static EvalResult vm_function_property_error(const Vm *vm) {
+    return vm_runtime_error(vm, RUNTIME_ERROR_TYPE, "function properties are limited to 'prototype' in L3");
+}
+
+static EvalResult vm_read_function_property(const Vm *vm, const JsFunction *function, const char *key) {
+    if (!vm_is_function_prototype_property(key)) {
+        return vm_function_property_error(vm);
+    }
+    if (function->prototype_object == NULL) {
+        return vm_result_ok(value_null());
+    }
+    return vm_result_ok(value_object_take(function->prototype_object));
+}
+
+static EvalResult vm_assign_function_property(const Vm *vm, JsFunction *function, const char *key, Value assigned_value) {
+    if (!vm_is_function_prototype_property(key)) {
+        return vm_function_property_error(vm);
+    }
+    if (function->is_native) {
+        return vm_runtime_error(vm, RUNTIME_ERROR_TYPE, "native functions are not constructors");
+    }
+    if (assigned_value.type != VALUE_NULL &&
+        (assigned_value.type != VALUE_OBJECT || assigned_value.as.object == NULL)) {
+        return vm_runtime_error(vm, RUNTIME_ERROR_TYPE, "function prototype must be an object or null");
+    }
+    function->prototype_object = assigned_value.type == VALUE_OBJECT ? assigned_value.as.object : NULL;
+    return vm_result_ok(value_null());
+}
+
+static bool vm_value_is_object_like(Value value) {
+    return value.type == VALUE_OBJECT || value.type == VALUE_ARRAY || value.type == VALUE_FUNCTION;
 }
 
 static void vm_define_builtin(Env *env, const char *name, size_t arity, VmBuiltinKind kind) {
@@ -384,7 +445,7 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
         goto cleanup;
     }
 
-    vm_push_frame(&vm, NULL, &program->functions[0], 0U);
+    vm_push_frame(&vm, NULL, &program->functions[0], 0U, 0U, value_null(), false, value_null());
 
     while (vm.frame_count > 0U) {
         VmFrame *frame = &vm.frames[vm.frame_count - 1U];
@@ -418,6 +479,13 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             case BC_DUP:
                 vm_push(&vm, value_clone(*vm_peek(&vm, 0U)));
                 break;
+            case BC_SWAP: {
+                Value top = vm_pop(&vm);
+                Value below = vm_pop(&vm);
+                vm_push(&vm, top);
+                vm_push(&vm, below);
+                break;
+            }
             case BC_LOAD_LOCAL:
                 vm_push(&vm, value_clone(vm.stack[frame->base + (size_t)instruction->operand]));
                 break;
@@ -489,6 +557,9 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 value_free(value);
                 break;
             }
+            case BC_LOAD_THIS:
+                vm_push(&vm, value_clone(frame->this_value));
+                break;
             case BC_NEG: {
                 Value value = vm_pop(&vm);
                 if (!vm_ensure_number(value)) {
@@ -668,6 +739,25 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     vm_push(&vm, result_value);
                     break;
                 }
+                if (target.type == VALUE_FUNCTION && target.as.function != NULL) {
+                    EvalResult property_result;
+                    if (key.type != VALUE_STRING) {
+                        value_free(target);
+                        value_free(key);
+                        result = vm_function_property_error(&vm);
+                        goto cleanup;
+                    }
+                    property_result = vm_read_function_property(&vm, target.as.function, key.as.string);
+                    value_free(target);
+                    value_free(key);
+                    if (property_result.had_error) {
+                        result = property_result;
+                        goto cleanup;
+                    }
+                    vm_push(&vm, property_result.value);
+                    property_result.value = value_null();
+                    break;
+                }
                 value_free(target);
                 value_free(key);
                 result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "indexing requires an array or object value");
@@ -715,36 +805,127 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     vm_push(&vm, value);
                     break;
                 }
+                if (target.type == VALUE_FUNCTION && target.as.function != NULL) {
+                    EvalResult property_result;
+                    if (key.type != VALUE_STRING) {
+                        value_free(target);
+                        value_free(key);
+                        value_free(value);
+                        result = vm_function_property_error(&vm);
+                        goto cleanup;
+                    }
+                    property_result = vm_assign_function_property(&vm, target.as.function, key.as.string, value);
+                    value_free(target);
+                    value_free(key);
+                    if (property_result.had_error) {
+                        value_free(value);
+                        result = property_result;
+                        goto cleanup;
+                    }
+                    eval_result_free(&property_result);
+                    vm_push(&vm, value);
+                    break;
+                }
                 value_free(target);
                 value_free(key);
                 value_free(value);
                 result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "index assignment requires an array or object value");
                 goto cleanup;
             }
-            case BC_CALL: {
+            case BC_NEW_INSTANCE: {
                 size_t argc = (size_t)instruction->operand;
                 size_t callee_index;
+                size_t i;
                 Value *callee;
+                JsObject *instance;
 
                 if (vm.stack_count < argc + 1U) {
-                    result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "stack underflow during call");
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "stack underflow during constructor preparation");
                     goto cleanup;
                 }
 
                 callee_index = vm.stack_count - argc - 1U;
                 callee = &vm.stack[callee_index];
                 if (callee->type != VALUE_FUNCTION || callee->as.function == NULL) {
-                    result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "attempted to call a non-function value");
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "new expects a constructor function");
+                    goto cleanup;
+                }
+                if (callee->as.function->is_native) {
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "native functions are not constructors");
+                    goto cleanup;
+                }
+
+                if (vm.stack_count == vm.stack_capacity) {
+                    size_t new_capacity = vm.stack_capacity == 0 ? 16U : vm.stack_capacity * 2U;
+                    vm.stack = jsrt_realloc(vm.stack, sizeof(*vm.stack) * new_capacity);
+                    vm.stack_capacity = new_capacity;
+                }
+
+                for (i = vm.stack_count; i > callee_index + 1U; --i) {
+                    vm.stack[i] = vm.stack[i - 1U];
+                }
+                instance = vm_create_object(0U);
+                instance->prototype = callee->as.function->prototype_object;
+                vm.stack[callee_index + 1U] = value_object_take(instance);
+                vm.stack_count += 1U;
+                break;
+            }
+            case BC_CALL:
+            case BC_CALL_METHOD:
+            case BC_CALL_NEW: {
+                size_t argc = (size_t)instruction->operand;
+                size_t extra = instruction->op == BC_CALL ? 1U : 2U;
+                size_t callee_index;
+                size_t args_index;
+                Value *callee;
+                Value this_value = value_null();
+                Value constructor_instance = value_null();
+
+                if (vm.stack_count < argc + extra) {
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "stack underflow during call");
+                    goto cleanup;
+                }
+
+                callee_index = vm.stack_count - argc - extra;
+                args_index = callee_index + extra;
+                callee = &vm.stack[callee_index];
+
+                if (instruction->op == BC_CALL_METHOD) {
+                    this_value = value_clone(vm.stack[callee_index + 1U]);
+                } else if (instruction->op == BC_CALL_NEW) {
+                    this_value = value_clone(vm.stack[callee_index + 1U]);
+                    constructor_instance = value_clone(vm.stack[callee_index + 1U]);
+                }
+
+                if (callee->type != VALUE_FUNCTION || callee->as.function == NULL) {
+                    value_free(this_value);
+                    value_free(constructor_instance);
+                    result = vm_runtime_error(
+                        &vm,
+                        RUNTIME_ERROR_TYPE,
+                        instruction->op == BC_CALL_NEW
+                            ? "new expects a constructor function"
+                            : "attempted to call a non-function value"
+                    );
+                    goto cleanup;
+                }
+
+                if (instruction->op == BC_CALL_NEW && callee->as.function->is_native) {
+                    value_free(this_value);
+                    value_free(constructor_instance);
+                    result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "native functions are not constructors");
                     goto cleanup;
                 }
 
                 if (callee->as.function->is_native) {
-                    EvalResult native_result = vm_call_native(&vm, callee->as.function, &vm.stack[callee_index + 1U]);
+                    EvalResult native_result = vm_call_native(&vm, callee->as.function, &vm.stack[args_index]);
                     size_t i;
                     for (i = callee_index; i < vm.stack_count; ++i) {
                         value_free(vm.stack[i]);
                     }
                     vm.stack_count = callee_index;
+                    value_free(this_value);
+                    value_free(constructor_instance);
                     if (native_result.had_error) {
                         result = native_result;
                         goto cleanup;
@@ -755,10 +936,14 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 }
 
                 if (callee->as.function->bytecode == NULL) {
+                    value_free(this_value);
+                    value_free(constructor_instance);
                     result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "invalid compiled function");
                     goto cleanup;
                 }
                 if (argc != callee->as.function->bytecode->arity) {
+                    value_free(this_value);
+                    value_free(constructor_instance);
                     result = vm_runtime_error_take(
                         &vm,
                         RUNTIME_ERROR_ARITY,
@@ -766,7 +951,18 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     );
                     goto cleanup;
                 }
-                vm_push_frame(&vm, callee->as.function, callee->as.function->bytecode, callee_index + 1U);
+                vm_push_frame(
+                    &vm,
+                    callee->as.function,
+                    callee->as.function->bytecode,
+                    callee_index,
+                    args_index,
+                    this_value,
+                    instruction->op == BC_CALL_NEW,
+                    constructor_instance
+                );
+                value_free(this_value);
+                value_free(constructor_instance);
                 break;
             }
             case BC_MAKE_FUNCTION:
@@ -793,18 +989,28 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 Value return_value = vm_pop(&vm);
 
                 if (vm.frame_count == 1U) {
+                    value_free(frame->this_value);
+                    value_free(frame->constructor_instance);
+                    vm.frame_count = 0U;
                     vm_free_stack(&vm, 0U);
                     result = vm_result_ok(return_value);
                     goto cleanup;
                 } else {
-                    size_t caller_base = frame->base - 1U;
+                    size_t caller_base = frame->call_base;
+                    Value final_value = return_value;
                     size_t i;
+                    if (frame->is_constructor && !vm_value_is_object_like(return_value)) {
+                        value_free(final_value);
+                        final_value = value_clone(frame->constructor_instance);
+                    }
                     for (i = caller_base; i < vm.stack_count; ++i) {
                         value_free(vm.stack[i]);
                     }
                     vm.stack_count = caller_base;
+                    value_free(frame->this_value);
+                    value_free(frame->constructor_instance);
                     vm.frame_count -= 1U;
-                    vm_push(&vm, return_value);
+                    vm_push(&vm, final_value);
                 }
                 break;
             }

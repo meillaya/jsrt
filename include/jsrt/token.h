@@ -48,7 +48,9 @@ typedef enum {
     TOKEN_CONTINUE,
     TOKEN_TRUE,
     TOKEN_FALSE,
-    TOKEN_NULL
+    TOKEN_NULL,
+    TOKEN_THIS,
+    TOKEN_NEW
 } TokenType;
 
 typedef struct {

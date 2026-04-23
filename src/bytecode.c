@@ -13,6 +13,7 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_FALSE: return "FALSE";
         case BC_POP: return "POP";
         case BC_DUP: return "DUP";
+        case BC_SWAP: return "SWAP";
         case BC_LOAD_LOCAL: return "LOAD_LOCAL";
         case BC_STORE_LOCAL: return "STORE_LOCAL";
         case BC_LOAD_UPVALUE: return "LOAD_UPVALUE";
@@ -20,6 +21,7 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_LOAD_GLOBAL: return "LOAD_GLOBAL";
         case BC_STORE_GLOBAL: return "STORE_GLOBAL";
         case BC_DEFINE_GLOBAL: return "DEFINE_GLOBAL";
+        case BC_LOAD_THIS: return "LOAD_THIS";
         case BC_NEG: return "NEG";
         case BC_NOT: return "NOT";
         case BC_ADD: return "ADD";
@@ -39,7 +41,10 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_MAKE_OBJECT: return "MAKE_OBJECT";
         case BC_GET_INDEX: return "GET_INDEX";
         case BC_SET_INDEX: return "SET_INDEX";
+        case BC_NEW_INSTANCE: return "NEW_INSTANCE";
         case BC_CALL: return "CALL";
+        case BC_CALL_METHOD: return "CALL_METHOD";
+        case BC_CALL_NEW: return "CALL_NEW";
         case BC_MAKE_FUNCTION: return "MAKE_FUNCTION";
         case BC_RETURN: return "RETURN";
     }
@@ -120,7 +125,11 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
         case BC_STORE_LOCAL:
         case BC_LOAD_UPVALUE:
         case BC_STORE_UPVALUE:
+        case BC_LOAD_THIS:
         case BC_CALL:
+        case BC_CALL_METHOD:
+        case BC_CALL_NEW:
+        case BC_NEW_INSTANCE:
         case BC_JUMP:
         case BC_JUMP_IF_FALSE:
         case BC_LOOP:

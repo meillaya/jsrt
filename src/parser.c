@@ -127,6 +127,25 @@ static Stmt *parse_statement(Parser *parser);
 static Expr *parse_assignment(Parser *parser);
 static Stmt *parse_var_declaration(Parser *parser, bool is_const);
 
+static bool parse_argument_list(Parser *parser, ExprArray *arguments, const char *error_message) {
+    expr_array_init(arguments);
+    if (!check(parser, TOKEN_RIGHT_PAREN)) {
+        do {
+            Expr *argument = parse_expression(parser);
+            if (argument == NULL) {
+                expr_array_free(arguments);
+                return false;
+            }
+            expr_array_push(arguments, argument);
+        } while (match(parser, TOKEN_COMMA));
+    }
+    if (!consume(parser, TOKEN_RIGHT_PAREN, error_message)) {
+        expr_array_free(arguments);
+        return false;
+    }
+    return true;
+}
+
 static Expr *parse_function_expression(Parser *parser) {
     const Token *keyword = previous(parser);
     const char *name = NULL;
@@ -272,6 +291,10 @@ static Expr *parse_primary(Parser *parser) {
         token = previous(parser);
         return ast_new_literal_null(token->line, token->column);
     }
+    if (match(parser, TOKEN_THIS)) {
+        token = previous(parser);
+        return ast_new_this(token->line, token->column);
+    }
     if (match(parser, TOKEN_IDENTIFIER)) {
         token = previous(parser);
         return ast_new_identifier(token->lexeme, token->line, token->column);
@@ -304,6 +327,51 @@ static Expr *parse_primary(Parser *parser) {
     return NULL;
 }
 
+static Expr *parse_new_callee(Parser *parser) {
+    Expr *expr;
+
+    if (match(parser, TOKEN_IDENTIFIER)) {
+        const Token *token = previous(parser);
+        expr = ast_new_identifier(token->lexeme, token->line, token->column);
+    } else if (match(parser, TOKEN_THIS)) {
+        const Token *token = previous(parser);
+        expr = ast_new_this(token->line, token->column);
+    } else {
+        set_error(parser, peek(parser), "expected constructor target after 'new'");
+        return NULL;
+    }
+
+    for (;;) {
+        if (match(parser, TOKEN_LEFT_BRACKET)) {
+            const Token *open = previous(parser);
+            Expr *index = parse_expression(parser);
+            if (index == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            if (!consume(parser, TOKEN_RIGHT_BRACKET, "expected ']' after constructor index expression")) {
+                expr_destroy(expr);
+                expr_destroy(index);
+                return NULL;
+            }
+            expr = ast_new_index(expr, index, open->line, open->column);
+            continue;
+        }
+        if (match(parser, TOKEN_DOT)) {
+            const Token *dot = previous(parser);
+            if (!consume(parser, TOKEN_IDENTIFIER, "expected property name after '.'")) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_property(expr, previous(parser)->lexeme, dot->line, dot->column);
+            continue;
+        }
+        break;
+    }
+
+    return expr;
+}
+
 static Expr *parse_postfix(Parser *parser) {
     Expr *expr = parse_primary(parser);
     if (expr == NULL) {
@@ -314,20 +382,12 @@ static Expr *parse_postfix(Parser *parser) {
         if (match(parser, TOKEN_LEFT_PAREN)) {
             const Token *open = previous(parser);
             ExprArray arguments;
-            expr_array_init(&arguments);
-            if (!check(parser, TOKEN_RIGHT_PAREN)) {
-                do {
-                    Expr *argument = parse_expression(parser);
-                    if (argument == NULL) {
-                        expr_array_free(&arguments);
-                        expr_destroy(expr);
-                        return NULL;
-                    }
-                    expr_array_push(&arguments, argument);
-                } while (match(parser, TOKEN_COMMA));
+            if (expr->kind == EXPR_NEW) {
+                expr_destroy(expr);
+                set_error(parser, open, "calling the result of 'new' is not supported in L3");
+                return NULL;
             }
-            if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after arguments")) {
-                expr_array_free(&arguments);
+            if (!parse_argument_list(parser, &arguments, "expected ')' after arguments")) {
                 expr_destroy(expr);
                 return NULL;
             }
@@ -365,6 +425,32 @@ static Expr *parse_postfix(Parser *parser) {
 }
 
 static Expr *parse_unary(Parser *parser) {
+    if (match(parser, TOKEN_NEW)) {
+        const Token *keyword = previous(parser);
+        Expr *callee = parse_new_callee(parser);
+        ExprArray arguments;
+
+        if (callee == NULL) {
+            return NULL;
+        }
+        if (!consume(parser, TOKEN_LEFT_PAREN, "expected '(' after constructor target in 'new' expression")) {
+            expr_destroy(callee);
+            return NULL;
+        }
+        if (!parse_argument_list(parser, &arguments, "expected ')' after constructor arguments")) {
+            expr_destroy(callee);
+            return NULL;
+        }
+        {
+            Expr *new_expr = ast_new_new(callee, arguments, keyword->line, keyword->column);
+            if (check(parser, TOKEN_LEFT_PAREN)) {
+                set_error(parser, peek(parser), "calling the result of 'new' is not supported in L3");
+                expr_destroy(new_expr);
+                return NULL;
+            }
+            return new_expr;
+        }
+    }
     if (match(parser, TOKEN_BANG) || match(parser, TOKEN_MINUS)) {
         const Token *op = previous(parser);
         Expr *right = parse_unary(parser);

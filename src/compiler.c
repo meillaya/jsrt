@@ -385,14 +385,57 @@ static bool compile_logical(Compiler *compiler, const Expr *expr, char **error_m
     return set_compile_error(compiler->source, expr->line, expr->column, 2, "unsupported logical operator in compiler", error_message);
 }
 
-static bool assignment_root_is_identifier(const Expr *expr) {
+static bool compile_method_call(
+    Compiler *compiler,
+    const Expr *callee,
+    const ExprArray *arguments,
+    char **error_message
+) {
+    size_t i;
+
+    if (callee->kind == EXPR_PROPERTY) {
+        if (!compile_expression(compiler, callee->as.property.target, error_message)) {
+            return false;
+        }
+        emit_instruction(compiler->function, BC_DUP, 0);
+        emit_instruction(
+            compiler->function,
+            BC_CONST,
+            add_constant(compiler->function, value_string(callee->as.property.name))
+        );
+        emit_instruction(compiler->function, BC_GET_INDEX, 0);
+        emit_instruction(compiler->function, BC_SWAP, 0);
+    } else {
+        if (!compile_expression(compiler, callee->as.index.target, error_message)) {
+            return false;
+        }
+        emit_instruction(compiler->function, BC_DUP, 0);
+        if (!compile_expression(compiler, callee->as.index.index, error_message)) {
+            return false;
+        }
+        emit_instruction(compiler->function, BC_GET_INDEX, 0);
+        emit_instruction(compiler->function, BC_SWAP, 0);
+    }
+
+    for (i = 0; i < arguments->count; ++i) {
+        if (!compile_expression(compiler, arguments->items[i], error_message)) {
+            return false;
+        }
+    }
+
+    emit_instruction(compiler->function, BC_CALL_METHOD, (int)arguments->count);
+    return true;
+}
+
+static bool assignment_root_is_bindable(const Expr *expr) {
     switch (expr->kind) {
         case EXPR_IDENTIFIER:
+        case EXPR_THIS:
             return true;
         case EXPR_PROPERTY:
-            return assignment_root_is_identifier(expr->as.property.target);
+            return assignment_root_is_bindable(expr->as.property.target);
         case EXPR_INDEX:
-            return assignment_root_is_identifier(expr->as.index.target);
+            return assignment_root_is_bindable(expr->as.index.target);
         default:
             return false;
     }
@@ -443,6 +486,9 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             break;
         case EXPR_IDENTIFIER:
             return compile_identifier_load(compiler, expr->as.identifier.name, expr->line, expr->column, error_message);
+        case EXPR_THIS:
+            emit_instruction(compiler->function, BC_LOAD_THIS, 0);
+            return true;
         case EXPR_UNARY:
             if (!compile_expression(compiler, expr->as.unary.operand, error_message)) {
                 return false;
@@ -485,8 +531,8 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                 emit_instruction(compiler->function, BC_DUP, 0);
                 return compile_identifier_store(compiler, expr->as.assign.target->as.identifier.name, expr->line, expr->column, error_message);
             }
-            if (!assignment_root_is_identifier(expr->as.assign.target)) {
-                return set_compile_error(compiler->source, expr->line, expr->column, 1, "assignment target must start with a variable", error_message);
+            if (!assignment_root_is_bindable(expr->as.assign.target)) {
+                return set_compile_error(compiler->source, expr->line, expr->column, 1, "assignment target must start with a variable or this", error_message);
             }
             if (!compile_assignment_target_container_and_key(compiler, expr->as.assign.target, error_message) ||
                 !compile_expression(compiler, expr->as.assign.value, error_message)) {
@@ -495,6 +541,9 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             emit_instruction(compiler->function, BC_SET_INDEX, 0);
             return true;
         case EXPR_CALL:
+            if (expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX) {
+                return compile_method_call(compiler, expr->as.call.callee, &expr->as.call.arguments, error_message);
+            }
             if (!compile_expression(compiler, expr->as.call.callee, error_message)) {
                 return false;
             }
@@ -559,6 +608,18 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                 add_constant(compiler->function, value_string(expr->as.property.name))
             );
             emit_instruction(compiler->function, BC_GET_INDEX, 0);
+            return true;
+        case EXPR_NEW:
+            if (!compile_expression(compiler, expr->as.new_expr.callee, error_message)) {
+                return false;
+            }
+            for (i = 0; i < expr->as.new_expr.arguments.count; ++i) {
+                if (!compile_expression(compiler, expr->as.new_expr.arguments.items[i], error_message)) {
+                    return false;
+                }
+            }
+            emit_instruction(compiler->function, BC_NEW_INSTANCE, (int)expr->as.new_expr.arguments.count);
+            emit_instruction(compiler->function, BC_CALL_NEW, (int)expr->as.new_expr.arguments.count);
             return true;
     }
 

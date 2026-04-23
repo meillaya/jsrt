@@ -12,6 +12,7 @@ typedef enum {
     BC_FALSE,
     BC_POP,
     BC_DUP,
+    BC_SWAP,
     BC_LOAD_LOCAL,
     BC_STORE_LOCAL,
     BC_LOAD_UPVALUE,
@@ -19,6 +20,7 @@ typedef enum {
     BC_LOAD_GLOBAL,
     BC_STORE_GLOBAL,
     BC_DEFINE_GLOBAL,
+    BC_LOAD_THIS,
     BC_NEG,
     BC_NOT,
     BC_ADD,
@@ -38,7 +40,10 @@ typedef enum {
     BC_MAKE_OBJECT,
     BC_GET_INDEX,
     BC_SET_INDEX,
+    BC_NEW_INSTANCE,
     BC_CALL,
+    BC_CALL_METHOD,
+    BC_CALL_NEW,
     BC_MAKE_FUNCTION,
     BC_RETURN
 } BytecodeOp;
