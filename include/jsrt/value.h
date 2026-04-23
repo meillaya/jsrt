@@ -65,6 +65,7 @@ struct JsObject {
     GcHeader gc;
     JsObjectEntry *items;
     size_t count;
+    JsObject *prototype;
 };
 
 Value value_number(double number);

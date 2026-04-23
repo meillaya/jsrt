@@ -13,7 +13,8 @@
 typedef enum {
     VM_BUILTIN_PRINT,
     VM_BUILTIN_LEN,
-    VM_BUILTIN_TYPEOF
+    VM_BUILTIN_TYPEOF,
+    VM_BUILTIN_SET_PROTOTYPE_OF
 } VmBuiltinKind;
 
 typedef struct {
@@ -228,6 +229,37 @@ static EvalResult vm_call_native(const Vm *vm, const JsFunction *function, Value
             }
         case VM_BUILTIN_TYPEOF:
             return vm_result_ok(value_string(vm_value_type_name(arguments[0])));
+        case VM_BUILTIN_SET_PROTOTYPE_OF: {
+            JsObject *receiver;
+            JsObject *prototype = NULL;
+
+            if (arguments[0].type != VALUE_OBJECT || arguments[0].as.object == NULL) {
+                return vm_runtime_error(vm, RUNTIME_ERROR_TYPE, "setPrototypeOf() expects an object receiver");
+            }
+            if (arguments[1].type != VALUE_NULL &&
+                (arguments[1].type != VALUE_OBJECT || arguments[1].as.object == NULL)) {
+                return vm_runtime_error(vm, RUNTIME_ERROR_TYPE, "setPrototypeOf() expects an object or null prototype");
+            }
+
+            receiver = arguments[0].as.object;
+            if (arguments[1].type == VALUE_OBJECT) {
+                prototype = arguments[1].as.object;
+            }
+
+            if (prototype == receiver) {
+                return vm_runtime_error(vm, RUNTIME_ERROR_ASSIGNMENT, "setPrototypeOf() cannot set an object as its own prototype");
+            }
+
+            while (prototype != NULL) {
+                if (prototype == receiver) {
+                    return vm_runtime_error(vm, RUNTIME_ERROR_ASSIGNMENT, "setPrototypeOf() cannot create a prototype cycle");
+                }
+                prototype = prototype->prototype;
+            }
+
+            receiver->prototype = arguments[1].type == VALUE_OBJECT ? arguments[1].as.object : NULL;
+            return vm_result_ok(value_clone(arguments[0]));
+        }
     }
     return vm_runtime_error(vm, RUNTIME_ERROR_INTERNAL, "unsupported builtin function");
 }
@@ -250,6 +282,7 @@ static JsObject *vm_create_object(size_t count) {
     gc_register_object(&object->gc, GC_OBJECT_OBJECT);
     object->count = count;
     object->items = jsrt_malloc(sizeof(*object->items) * count);
+    object->prototype = NULL;
     for (i = 0; i < count; ++i) {
         object->items[i].key = NULL;
         object->items[i].value = value_null();
@@ -280,6 +313,26 @@ static void vm_object_set_key(JsObject *object, const char *key, Value value) {
     object->count += 1U;
 }
 
+static bool vm_object_lookup_key(JsObject *object, const char *key, JsObject **owner, ptrdiff_t *index) {
+    JsObject *current = object;
+
+    while (current != NULL) {
+        ptrdiff_t current_index = vm_object_find_key(current, key);
+        if (current_index >= 0) {
+            if (owner != NULL) {
+                *owner = current;
+            }
+            if (index != NULL) {
+                *index = current_index;
+            }
+            return true;
+        }
+        current = current->prototype;
+    }
+
+    return false;
+}
+
 static void vm_define_builtin(Env *env, const char *name, size_t arity, VmBuiltinKind kind) {
     Value builtin = value_function(vm_create_native_function(name, arity, kind));
     env_define(env, name, builtin, true);
@@ -290,6 +343,7 @@ static void vm_define_builtins(Env *env) {
     vm_define_builtin(env, "print", 1U, VM_BUILTIN_PRINT);
     vm_define_builtin(env, "len", 1U, VM_BUILTIN_LEN);
     vm_define_builtin(env, "typeOf", 1U, VM_BUILTIN_TYPEOF);
+    vm_define_builtin(env, "setPrototypeOf", 2U, VM_BUILTIN_SET_PROTOTYPE_OF);
 }
 
 static EvalResult vm_binary_add(Value left, Value right) {
@@ -594,6 +648,7 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 }
                 if (target.type == VALUE_OBJECT) {
                     ptrdiff_t idx;
+                    JsObject *owner;
                     Value result_value;
                     if (key.type != VALUE_STRING) {
                         value_free(target);
@@ -601,14 +656,13 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                         result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "object indexing expects a string key");
                         goto cleanup;
                     }
-                    idx = vm_object_find_key(target.as.object, key.as.string);
-                    if (idx < 0) {
+                    if (!vm_object_lookup_key(target.as.object, key.as.string, &owner, &idx)) {
                         value_free(target);
                         result = vm_runtime_error_take(&vm, RUNTIME_ERROR_LOOKUP, jsrt_format("object key '%s' not found", key.as.string));
                         value_free(key);
                         goto cleanup;
                     }
-                    result_value = value_clone(target.as.object->items[(size_t)idx].value);
+                    result_value = value_clone(owner->items[(size_t)idx].value);
                     value_free(target);
                     value_free(key);
                     vm_push(&vm, result_value);
