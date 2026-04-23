@@ -19,7 +19,7 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 | Strings | string literals with basic escapes, concatenation with `+`, equality | `tests/test_lexer.c`, `tests/test_eval.c`, `examples/strings.js` |
 | Functions | declarations, calls, closures, `return` | `tests/test_eval.c`, `examples/functions.js` |
 | Arrays | literals, indexing, equality by deep element comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
-| Objects | literals, dot/bracket access, equality by ordered key/value comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
+| Objects | literals, dot/bracket access, explicit prototype linkage via `setPrototypeOf`, equality by ordered own key/value comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
 
 ## Built-in library baseline
 
@@ -28,6 +28,7 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 | `print(value)` | writes the value's string form plus newline, returns `null` | `tests/test_eval.c`, `examples/builtins.js` |
 | `len(value)` | returns length/count for strings, arrays, and objects | `tests/test_eval.c`, `src/eval.c` |
 | `typeOf(value)` | returns stable runtime type labels | `tests/test_eval.c`, `src/eval.c` |
+| `setPrototypeOf(obj, protoOrNull)` | links an object to an object/null prototype; rejects non-object receivers, invalid prototypes, self-links, and cycles | `tests/test_eval.c`, `tests/test_vm.c`, `src/eval.c`, `src/vm.c` |
 
 ## Control flow baseline
 
@@ -53,8 +54,13 @@ This document freezes the current externally visible behavior of `jsrt` as of Ro
 - Arrays and objects preserve **shared identity** across environment read/write boundaries.
 - Updating an array/object binding, property, or index **does** mutate every alias that points at the same aggregate.
 - Property assignment may create a missing object key on the final write step.
+- Object reads search own properties first, then walk the explicit prototype chain until a match is found or the chain ends.
+- Object writes remain receiver-local on the final write step; they do not climb the prototype chain to rewrite ancestors.
+- Inherited intermediate containers may still be resolved through prototypes during nested assignment (for example `obj.nested.value = 1` may mutate the inherited `nested` object).
+- Function values found through object property lookup are still called as plain functions; this milestone does **not** add implicit receiver / `this` binding.
 - Array assignment is in-bounds only.
 - Function argument passing and returns preserve aggregate identity instead of de-aliasing arrays/objects.
+- Object helper behavior remains own-only in L2: `len(obj)` counts own keys only, object equality ignores prototype identity and compares own properties only, and stringification displays only own keys.
 - Self-referential arrays/objects can now arise through assignment; stringification and equality remain cycle-safe instead of recursing forever.
 
 Evidence:
@@ -77,7 +83,6 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- prototype linkage / prototype-chain lookup / method dispatch
 - classes / `this` / `new`
 - async / event loop behavior
 - broad ECMAScript coercion compatibility
