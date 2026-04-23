@@ -1,6 +1,7 @@
 #ifndef JSRT_BYTECODE_H
 #define JSRT_BYTECODE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "jsrt/value.h"
@@ -60,6 +61,7 @@ typedef struct {
 
 typedef struct BytecodeFunction {
     char *name;
+    bool is_class_constructor;
     size_t arity;
     size_t local_count;
     BytecodeUpvalue *upvalues;

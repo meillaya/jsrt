@@ -1214,6 +1214,74 @@ void run_eval_tests(TestContext *ctx) {
     eval_result_free(&result);
 
     result = evaluate_source(
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "  twice() { return this.get() + this.get(); }\n"
+        "}\n"
+        "let box = new Box(3);\n"
+        "box.twice();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 6.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "class Empty {\n"
+        "  get() { return 7; }\n"
+        "}\n"
+        "let box = new Empty();\n"
+        "box.get();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 7.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { if (this == null) { return 1; } return this.value; }\n"
+        "}\n"
+        "let box = new Box(4);\n"
+        "let f = box.get;\n"
+        "f();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return 0; }\n"
+        "}\n"
+        "let proto = {get: function () { return this.value; }};\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(9);\n"
+        "Box[\"prototype\"] == proto && box.get() == 9;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("class Box { constructor(v) { this.value = v; } }\nBox(1);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "class constructors must be called with 'new'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
         "let log = \"\";\n"
         "function note(label, value) { log = log + label; return value; }\n"
         "let holder = {value: 5, get: function (x) { return log + \":\" + this.value + \":\" + x; }};\n"
@@ -1241,6 +1309,86 @@ void run_eval_tests(TestContext *ctx) {
     value_free(result.value);
     eval_result_free(&result);
 
+    result = evaluate_source(
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "  read() { return this.get(); }\n"
+        "}\n"
+        "let box = new Box(3);\n"
+        "box.read();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 3.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "class Empty { get() { return this.value; } }\n"
+        "let box = new Empty();\n"
+        "box.value = 4;\n"
+        "box.get == Empty.prototype.get && box.get() == 4;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "class Box { get() { if (this == null) { return 1; } return this.value; } }\n"
+        "let box = new Box();\n"
+        "box.value = 4;\n"
+        "let f = box.get;\n"
+        "f();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "}\n"
+        "let proto = {get: function () { return 8; }};\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(2);\n"
+        "Box.prototype == proto && box.get() == 8;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("class Box {}\nBox();\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "class constructors must be called with 'new'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("Box;\nclass Box {}\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "undefined variable 'Box'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("if (true) { class Box {} }\nBox;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "undefined variable 'Box'") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("class Box {}\nclass Box {}\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "redeclaration of 'Box' in the same scope") != NULL);
+    eval_result_free(&result);
+
     assert_example_output(ctx, "examples/arithmetic.js", "7\n");
     assert_example_output(ctx, "examples/branching.js", "20\n");
     assert_example_output(ctx, "examples/functions.js", "7\n");
@@ -1257,4 +1405,5 @@ void run_eval_tests(TestContext *ctx) {
     assert_example_output(ctx, "examples/builtins.js", "object:5:3\n");
     assert_example_output(ctx, "examples/gc_stress.js", "85\n");
     assert_example_output(ctx, "examples/this_new.js", "11:11\n");
+    assert_example_output(ctx, "examples/class_syntax.js", "7:true\n");
 }

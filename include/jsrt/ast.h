@@ -50,6 +50,21 @@ typedef struct {
     size_t capacity;
 } SwitchCaseArray;
 
+typedef struct {
+    char *name;
+    StringArray params;
+    StmtArray body;
+    bool is_constructor;
+    int line;
+    int column;
+} ClassMethod;
+
+typedef struct {
+    ClassMethod *items;
+    size_t count;
+    size_t capacity;
+} ClassMethodArray;
+
 typedef enum {
     LITERAL_NUMBER,
     LITERAL_BOOL,
@@ -148,6 +163,7 @@ typedef enum {
     STMT_WHILE,
     STMT_SWITCH,
     STMT_FUNCTION,
+    STMT_CLASS,
     STMT_RETURN,
     STMT_BREAK,
     STMT_CONTINUE
@@ -198,6 +214,10 @@ struct Stmt {
             StmtArray body;
         } function;
         struct {
+            char *name;
+            ClassMethodArray methods;
+        } class_stmt;
+        struct {
             Expr *value;
         } return_stmt;
     } as;
@@ -218,6 +238,10 @@ void object_property_array_free(ObjectPropertyArray *array);
 void switch_case_array_init(SwitchCaseArray *array);
 void switch_case_array_push(SwitchCaseArray *array, SwitchCase switch_case);
 void switch_case_array_free(SwitchCaseArray *array);
+
+void class_method_array_init(ClassMethodArray *array);
+void class_method_array_push(ClassMethodArray *array, ClassMethod method);
+void class_method_array_free(ClassMethodArray *array);
 
 void stmt_array_init(StmtArray *array);
 void stmt_array_push(StmtArray *array, Stmt *stmt);
@@ -250,6 +274,7 @@ Stmt *ast_new_for_stmt(Stmt *init, Expr *condition, Expr *increment, Stmt *body,
 Stmt *ast_new_while_stmt(Expr *condition, Stmt *body, int line, int column);
 Stmt *ast_new_switch_stmt(Expr *expression, SwitchCaseArray cases, int line, int column);
 Stmt *ast_new_function_stmt(const char *name, StringArray params, StmtArray body, int line, int column);
+Stmt *ast_new_class_stmt(const char *name, ClassMethodArray methods, int line, int column);
 Stmt *ast_new_return_stmt(Expr *value, int line, int column);
 Stmt *ast_new_break_stmt(int line, int column);
 Stmt *ast_new_continue_stmt(int line, int column);

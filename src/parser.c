@@ -81,6 +81,23 @@ static void set_error(Parser *parser, const Token *token, const char *message) {
     }
 }
 
+static void set_error_at(Parser *parser, int line, int column, int width, const char *message) {
+    if (!parser->panic_mode) {
+        append_error(
+            parser,
+            format_source_diagnostic(
+                "Parser error",
+                parser->source,
+                line,
+                column,
+                width,
+                message
+            )
+        );
+        parser->panic_mode = true;
+    }
+}
+
 static void synchronize(Parser *parser) {
     parser->panic_mode = false;
     while (!is_at_end(parser)) {
@@ -94,6 +111,7 @@ static void synchronize(Parser *parser) {
         switch (peek(parser)->type) {
             case TOKEN_LET:
             case TOKEN_FUNCTION:
+            case TOKEN_CLASS:
             case TOKEN_IF:
             case TOKEN_DO:
             case TOKEN_FOR:
@@ -126,6 +144,45 @@ static Stmt *parse_declaration(Parser *parser);
 static Stmt *parse_statement(Parser *parser);
 static Expr *parse_assignment(Parser *parser);
 static Stmt *parse_var_declaration(Parser *parser, bool is_const);
+static Stmt *parse_class_declaration(Parser *parser);
+
+static bool parse_function_tail(
+    Parser *parser,
+    const char *open_message,
+    StringArray *params,
+    StmtArray *body
+) {
+    if (!consume(parser, TOKEN_LEFT_PAREN, open_message)) {
+        return false;
+    }
+
+    if (!check(parser, TOKEN_RIGHT_PAREN)) {
+        do {
+            if (!consume(parser, TOKEN_IDENTIFIER, "expected parameter name")) {
+                return false;
+            }
+            string_array_push(params, jsrt_strdup(previous(parser)->lexeme));
+        } while (match(parser, TOKEN_COMMA));
+    }
+
+    if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after parameters")) {
+        return false;
+    }
+    if (!consume(parser, TOKEN_LEFT_BRACE, "expected '{' before function body")) {
+        return false;
+    }
+
+    while (!check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
+        Stmt *statement = parse_declaration(parser);
+        if (statement != NULL) {
+            stmt_array_push(body, statement);
+        } else {
+            synchronize(parser);
+        }
+    }
+
+    return consume(parser, TOKEN_RIGHT_BRACE, "expected '}' after function body");
+}
 
 static Expr *parse_new_target(Parser *parser) {
     Expr *expr;
@@ -215,50 +272,135 @@ static Expr *parse_function_expression(Parser *parser) {
         name = previous(parser)->lexeme;
     }
 
-    if (!consume(parser, TOKEN_LEFT_PAREN, "expected '(' after 'function'")) {
-        string_array_free(&params);
-        stmt_array_free(&body);
-        return NULL;
-    }
-
-    if (!check(parser, TOKEN_RIGHT_PAREN)) {
-        do {
-            if (!consume(parser, TOKEN_IDENTIFIER, "expected parameter name")) {
-                string_array_free(&params);
-                stmt_array_free(&body);
-                return NULL;
-            }
-            string_array_push(&params, jsrt_strdup(previous(parser)->lexeme));
-        } while (match(parser, TOKEN_COMMA));
-    }
-
-    if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after parameters")) {
-        string_array_free(&params);
-        stmt_array_free(&body);
-        return NULL;
-    }
-    if (!consume(parser, TOKEN_LEFT_BRACE, "expected '{' before function body")) {
-        string_array_free(&params);
-        stmt_array_free(&body);
-        return NULL;
-    }
-
-    while (!check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
-        Stmt *statement = parse_declaration(parser);
-        if (statement != NULL) {
-            stmt_array_push(&body, statement);
-        } else {
-            synchronize(parser);
-        }
-    }
-
-    if (!consume(parser, TOKEN_RIGHT_BRACE, "expected '}' after function body")) {
+    if (!parse_function_tail(parser, "expected '(' after 'function'", &params, &body)) {
         string_array_free(&params);
         stmt_array_free(&body);
         return NULL;
     }
 
     return ast_new_function_expr(name, params, body, keyword->line, keyword->column);
+}
+
+static bool parse_class_method(Parser *parser, ClassMethod *method) {
+    const Token *name_token;
+    StringArray params;
+    StmtArray body;
+
+    string_array_init(&params);
+    stmt_array_init(&body);
+
+    if (match(parser, TOKEN_LEFT_BRACKET)) {
+        set_error(parser, previous(parser), "computed method names are unsupported in L4 classes");
+        string_array_free(&params);
+        stmt_array_free(&body);
+        return false;
+    }
+    if (match(parser, TOKEN_SUPER)) {
+        set_error(parser, previous(parser), "super is unsupported in L4 classes");
+        string_array_free(&params);
+        stmt_array_free(&body);
+        return false;
+    }
+    if (!consume(parser, TOKEN_IDENTIFIER, "expected class member name")) {
+        string_array_free(&params);
+        stmt_array_free(&body);
+        return false;
+    }
+
+    name_token = previous(parser);
+    if ((strcmp(name_token->lexeme, "static") == 0 ||
+         strcmp(name_token->lexeme, "get") == 0 ||
+         strcmp(name_token->lexeme, "set") == 0) &&
+        !check(parser, TOKEN_LEFT_PAREN)) {
+        const char *message =
+            strcmp(name_token->lexeme, "static") == 0
+                ? "static class members are unsupported in L4"
+                : (strcmp(name_token->lexeme, "get") == 0
+                    ? "getter syntax is unsupported in L4 classes"
+                    : "setter syntax is unsupported in L4 classes");
+        set_error(parser, name_token, message);
+        string_array_free(&params);
+        stmt_array_free(&body);
+        return false;
+    }
+    if (!check(parser, TOKEN_LEFT_PAREN)) {
+        set_error(parser, name_token, "class fields are unsupported in L4");
+        string_array_free(&params);
+        stmt_array_free(&body);
+        return false;
+    }
+    if (!parse_function_tail(parser, "expected '(' after class member name", &params, &body)) {
+        string_array_free(&params);
+        stmt_array_free(&body);
+        return false;
+    }
+
+    method->name = jsrt_strdup(name_token->lexeme);
+    method->params = params;
+    method->body = body;
+    method->is_constructor = strcmp(name_token->lexeme, "constructor") == 0;
+    method->line = name_token->line;
+    method->column = name_token->column;
+    return true;
+}
+
+static Stmt *parse_class_declaration(Parser *parser) {
+    const Token *keyword = previous(parser);
+    const Token *name_token;
+    ClassMethodArray methods;
+    bool saw_constructor = false;
+
+    class_method_array_init(&methods);
+    if (!consume(parser, TOKEN_IDENTIFIER, "expected class name")) {
+        class_method_array_free(&methods);
+        return NULL;
+    }
+    name_token = previous(parser);
+
+    if (match(parser, TOKEN_EXTENDS)) {
+        set_error(parser, previous(parser), "extends is unsupported in L4 classes");
+        class_method_array_free(&methods);
+        return NULL;
+    }
+    if (!consume(parser, TOKEN_LEFT_BRACE, "expected '{' before class body")) {
+        class_method_array_free(&methods);
+        return NULL;
+    }
+
+    while (!check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
+        ClassMethod method;
+
+        if (match(parser, TOKEN_SEMICOLON)) {
+            continue;
+        }
+        if (!parse_class_method(parser, &method)) {
+            class_method_array_free(&methods);
+            return NULL;
+        }
+        if (method.is_constructor && saw_constructor) {
+            set_error_at(
+                parser,
+                method.line,
+                method.column,
+                (int)strlen(method.name),
+                "duplicate constructor definitions are unsupported"
+            );
+            free(method.name);
+            string_array_free(&method.params);
+            stmt_array_free(&method.body);
+            class_method_array_free(&methods);
+            return NULL;
+        }
+        saw_constructor = saw_constructor || method.is_constructor;
+        class_method_array_push(&methods, method);
+    }
+
+    if (!consume(parser, TOKEN_RIGHT_BRACE, "expected '}' after class body")) {
+        class_method_array_free(&methods);
+        return NULL;
+    }
+
+    return ast_new_class_stmt(name_token->lexeme, methods, keyword->line, keyword->column);
 }
 
 static Expr *parse_array_literal(Parser *parser, const Token *open) {
@@ -351,9 +493,17 @@ static Expr *parse_primary(Parser *parser) {
         token = previous(parser);
         return ast_new_this(token->line, token->column);
     }
+    if (match(parser, TOKEN_SUPER)) {
+        set_error(parser, previous(parser), "super is unsupported in L4 classes");
+        return NULL;
+    }
     if (match(parser, TOKEN_NEW)) {
         token = previous(parser);
         return parse_new_expression(parser, token);
+    }
+    if (match(parser, TOKEN_CLASS)) {
+        set_error(parser, previous(parser), "class expressions are unsupported in L4");
+        return NULL;
     }
     if (match(parser, TOKEN_IDENTIFIER)) {
         token = previous(parser);
@@ -976,44 +1126,7 @@ static Stmt *parse_function_declaration(Parser *parser) {
     }
     name_token = previous(parser);
 
-    if (!consume(parser, TOKEN_LEFT_PAREN, "expected '(' after function name")) {
-        string_array_free(&params);
-        stmt_array_free(&body);
-        return NULL;
-    }
-
-    if (!check(parser, TOKEN_RIGHT_PAREN)) {
-        do {
-            if (!consume(parser, TOKEN_IDENTIFIER, "expected parameter name")) {
-                string_array_free(&params);
-                stmt_array_free(&body);
-                return NULL;
-            }
-            string_array_push(&params, jsrt_strdup(previous(parser)->lexeme));
-        } while (match(parser, TOKEN_COMMA));
-    }
-
-    if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after parameters")) {
-        string_array_free(&params);
-        stmt_array_free(&body);
-        return NULL;
-    }
-    if (!consume(parser, TOKEN_LEFT_BRACE, "expected '{' before function body")) {
-        string_array_free(&params);
-        stmt_array_free(&body);
-        return NULL;
-    }
-
-    while (!check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
-        Stmt *statement = parse_declaration(parser);
-        if (statement != NULL) {
-            stmt_array_push(&body, statement);
-        } else {
-            synchronize(parser);
-        }
-    }
-
-    if (!consume(parser, TOKEN_RIGHT_BRACE, "expected '}' after function body")) {
+    if (!parse_function_tail(parser, "expected '(' after function name", &params, &body)) {
         string_array_free(&params);
         stmt_array_free(&body);
         return NULL;
@@ -1025,6 +1138,9 @@ static Stmt *parse_function_declaration(Parser *parser) {
 static Stmt *parse_declaration(Parser *parser) {
     if (match(parser, TOKEN_FUNCTION)) {
         return parse_function_declaration(parser);
+    }
+    if (match(parser, TOKEN_CLASS)) {
+        return parse_class_declaration(parser);
     }
     if (match(parser, TOKEN_LET)) {
         return parse_var_declaration(parser, false);

@@ -174,6 +174,59 @@ void run_diagnostics_tests(TestContext *ctx) {
     );
     free(error);
 
+    error = parse_error_for("class Box extends Base {}");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:11: extends is unsupported in L4 classes\n"
+        "class Box extends Base {}\n"
+        "          ^^^^^^^"
+    );
+    free(error);
+
+    error = parse_error_for("class Box { static foo() {} }");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:13: static class members are unsupported in L4\n"
+        "class Box { static foo() {} }\n"
+        "            ^^^^^^\n\n"
+        "Parser error at 1:29: expected expression\n"
+        "class Box { static foo() {} }\n"
+        "                            ^"
+    );
+    free(error);
+
+    error = parse_error_for("class Box { constructor() { super(); } }");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:29: super is unsupported in L4 classes\n"
+        "class Box { constructor() { super(); } }\n"
+        "                            ^^^^^\n\n"
+        "Parser error at 1:41: expected '}' after class body\n"
+        "class Box { constructor() { super(); } }\n"
+        "                                        ^"
+    );
+    free(error);
+
+    error = parse_error_for("let Box = class {};");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:11: class expressions are unsupported in L4\n"
+        "let Box = class {};\n"
+        "          ^^^^^\n\n"
+        "Parser error at 1:19: expected expression\n"
+        "let Box = class {};\n"
+        "                  ^"
+    );
+    free(error);
+
     {
         EvalResult result = eval_result_for("let arr = [1];\narr[3];\n");
         EXPECT_TRUE(ctx, result.had_error);
@@ -272,6 +325,20 @@ void run_diagnostics_tests(TestContext *ctx) {
             "Runtime error [type] at 2:5: only function.prototype is supported in L3\n"
             "Ctor.x = 1;\n"
             "    ^"
+        );
+        eval_result_free(&result);
+    }
+
+    {
+        EvalResult result = eval_result_for("class Box {}\nBox();\n");
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_TYPE);
+        EXPECT_STRING_EQ(
+            ctx,
+            result.error_message,
+            "Runtime error [type] at 2:4: class constructors must be called with 'new'\n"
+            "Box();\n"
+            "   ^"
         );
         eval_result_free(&result);
     }

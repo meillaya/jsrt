@@ -206,8 +206,12 @@ static JsFunction *vm_create_native_function(const char *name, size_t arity, VmB
     JsFunction *function = jsrt_malloc(sizeof(*function));
     gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
     function->is_native = true;
+    function->is_class_constructor = false;
     function->declaration = (const struct Stmt *)(size_t)(kind + 1U);
     function->expression = NULL;
+    function->name = name;
+    function->params = NULL;
+    function->body = NULL;
     function->closure = NULL;
     function->native_name = name;
     function->native_arity = arity;
@@ -226,8 +230,12 @@ static JsFunction *vm_create_compiled_function(const BytecodeFunction *function)
     JsFunction *js_function = jsrt_malloc(sizeof(*js_function));
     gc_register_object(&js_function->gc, GC_OBJECT_FUNCTION);
     js_function->is_native = false;
+    js_function->is_class_constructor = function->is_class_constructor;
     js_function->declaration = NULL;
     js_function->expression = NULL;
+    js_function->name = function->name;
+    js_function->params = NULL;
+    js_function->body = NULL;
     js_function->closure = NULL;
     js_function->native_name = NULL;
     js_function->native_arity = function->arity;
@@ -862,6 +870,10 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     goto cleanup;
                 }
                 function = callee->as.function;
+                if (function->is_class_constructor) {
+                    result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "class constructors must be called with 'new'");
+                    goto cleanup;
+                }
 
                 if (function->is_native) {
                     EvalResult native_result = vm_call_native(&vm, function, &vm.stack[callee_index + 1U]);
@@ -932,6 +944,10 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 }
                 if (is_constructor && callee->as.function->is_native) {
                     result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "native functions are not constructors");
+                    goto cleanup;
+                }
+                if (!is_constructor && callee->as.function->is_class_constructor) {
+                    result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "class constructors must be called with 'new'");
                     goto cleanup;
                 }
                 if (is_constructor && vm.stack[receiver_index].type == VALUE_OBJECT) {

@@ -90,6 +90,9 @@ const char *token_type_name(TokenType type) {
         case TOKEN_LET: return "let";
         case TOKEN_CONST: return "const";
         case TOKEN_FUNCTION: return "function";
+        case TOKEN_CLASS: return "class";
+        case TOKEN_EXTENDS: return "extends";
+        case TOKEN_SUPER: return "super";
         case TOKEN_RETURN: return "return";
         case TOKEN_IF: return "if";
         case TOKEN_ELSE: return "else";
@@ -119,6 +122,15 @@ static TokenType identifier_type(const char *lexeme) {
     }
     if (strcmp(lexeme, "function") == 0) {
         return TOKEN_FUNCTION;
+    }
+    if (strcmp(lexeme, "class") == 0) {
+        return TOKEN_CLASS;
+    }
+    if (strcmp(lexeme, "extends") == 0) {
+        return TOKEN_EXTENDS;
+    }
+    if (strcmp(lexeme, "super") == 0) {
+        return TOKEN_SUPER;
     }
     if (strcmp(lexeme, "return") == 0) {
         return TOKEN_RETURN;

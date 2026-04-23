@@ -18,6 +18,7 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 | Null | `null` literal; falsy; final `null` is not printed by CLI | `src/main.c`, evaluator behavior |
 | Strings | string literals with basic escapes, concatenation with `+`, equality | `tests/test_lexer.c`, `tests/test_eval.c`, `examples/strings.js` |
 | Functions | declarations, calls, closures, `return` | `tests/test_eval.c`, `examples/functions.js` |
+| Classes | bounded `class Name { ... }` declarations with an optional `constructor(...)` and identifier-named instance methods lowered onto the current constructor/prototype runtime | `tests/test_eval.c`, `tests/test_vm.c`, `examples/class_syntax.js` |
 | Arrays | literals, indexing, equality by deep element comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
 | Objects | literals, dot/bracket access, explicit prototype linkage via `setPrototypeOf`, own-first then prototype-chain lookup, equality by ordered own key/value comparison | `tests/test_eval.c`, `src/eval.c`, `src/vm.c`, `src/value.c`, `examples/arrays_objects.js` |
 
@@ -77,6 +78,8 @@ Evidence:
 - Plain calls, extracted methods, and bare/top-level `this` use `this = null`.
 - `new Ctor(args)` is supported in the bounded L3 form only: the surface requires parentheses, native functions are not constructors, and unsupported constructor-result chaining stays out of scope.
 - Instances created by `new` use `Ctor.prototype` / `Ctor["prototype"]` when that slot is an object; `null` yields no prototype.
+- Bounded L4 class declarations reuse that same constructor/prototype substrate: `class Name { ... }` defines a constructable function value, installs instance methods on `Name.prototype`, and rejects `Name()` without `new`.
+- This first L4 slice keeps the existing sequential/no-TDZ declaration model: use-before-declaration still fails as an undefined-name lookup, block scope is preserved, and same-scope redeclaration remains rejected.
 - Object helpers remain own-only in L2: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
 
 Evidence:
@@ -102,7 +105,8 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- classes / `super`
+- `extends` / `super`
+- static methods, fields, getters/setters, computed method names, and class expressions
 - bare `new Ctor` without parentheses
 - constructor-result postfix chaining such as `new Ctor().field`
 - async / event loop behavior

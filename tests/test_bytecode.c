@@ -183,6 +183,32 @@ void run_bytecode_tests(TestContext *ctx) {
 
     {
         const char *source =
+            "class Box {\n"
+            "  constructor(v) { this.value = v; }\n"
+            "  get() { return this.value; }\n"
+            "}\n"
+            "let box = new Box(3);\n"
+            "box.get();\n";
+        BytecodeProgram program;
+        char *error = NULL;
+        char *disassembly;
+
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "function Box arity=1") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "function get arity=0") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "GET_INDEX") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "SET_INDEX") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CLASS") == NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
+    }
+
+    {
+        const char *source =
             "let arr = [1, 2, 3];\n"
             "let obj = {name: \"jsrt\", third: arr[2]};\n"
             "arr[1] = 9;\n"

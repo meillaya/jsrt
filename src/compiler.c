@@ -52,6 +52,9 @@ typedef struct Compiler {
     ControlContext *control;
 } Compiler;
 
+static const StringArray EMPTY_PARAMS = {NULL, 0U, 0U};
+static const StmtArray EMPTY_BODY = {NULL, 0U, 0U};
+
 static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error_message);
 static bool compile_expression(Compiler *compiler, const Expr *expr, char **error_message);
 
@@ -108,6 +111,7 @@ static BytecodeFunction *add_function(BytecodeProgram *program, const char *name
     }
     function = &program->functions[program->function_count++];
     function->name = name != NULL ? jsrt_strdup(name) : NULL;
+    function->is_class_constructor = false;
     function->arity = arity;
     function->local_count = 0;
     function->upvalues = NULL;
@@ -381,6 +385,7 @@ static bool compile_function_body(
     const char *name,
     const StringArray *params,
     const StmtArray *body,
+    bool is_class_constructor,
     int line,
     int column,
     char **error_message,
@@ -402,6 +407,7 @@ static bool compile_function_body(
     child.scope_depth = 1;
     child.is_script = false;
     child.control = NULL;
+    function->is_class_constructor = is_class_constructor;
     function->local_count = 1U;
 
     for (i = 0; i < params->count; ++i) {
@@ -419,6 +425,86 @@ static bool compile_function_body(
     emit_instruction(function, BC_RETURN, 0);
     free(child.locals);
     *out_index = function_index;
+    return true;
+}
+
+static bool compile_class_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
+    const ClassMethod *constructor = NULL;
+    int function_index;
+    size_t i;
+
+    for (i = 0; i < stmt->as.class_stmt.methods.count; ++i) {
+        if (stmt->as.class_stmt.methods.items[i].is_constructor) {
+            constructor = &stmt->as.class_stmt.methods.items[i];
+            break;
+        }
+    }
+
+    if (!compile_function_body(
+            compiler,
+            stmt->as.class_stmt.name,
+            constructor != NULL ? &constructor->params : &EMPTY_PARAMS,
+            constructor != NULL ? &constructor->body : &EMPTY_BODY,
+            true,
+            stmt->line,
+            stmt->column,
+            error_message,
+            &function_index)) {
+        return false;
+    }
+
+    emit_instruction(compiler->function, BC_MAKE_FUNCTION, function_index);
+    emit_instruction(compiler->function, BC_DUP, 0);
+    if (compiler->is_script && compiler->scope_depth == 0) {
+        emit_instruction(compiler->function, BC_DEFINE_GLOBAL, add_global_symbol(compiler->program, stmt->as.class_stmt.name));
+    } else {
+        if (!declare_local(compiler, stmt->as.class_stmt.name, stmt->line, stmt->column, error_message)) {
+            return false;
+        }
+        emit_instruction(compiler->function, BC_STORE_LOCAL, (int)(compiler->locals[compiler->local_count - 1U].slot));
+    }
+
+    for (i = 0; i < stmt->as.class_stmt.methods.count; ++i) {
+        const ClassMethod *method = &stmt->as.class_stmt.methods.items[i];
+        int method_index;
+        int get_index;
+        int set_index;
+
+        if (method->is_constructor) {
+            continue;
+        }
+        if (!compile_function_body(
+                compiler,
+                method->name,
+                &method->params,
+                &method->body,
+                false,
+                method->line,
+                method->column,
+                error_message,
+                &method_index)) {
+            return false;
+        }
+        emit_instruction(compiler->function, BC_DUP, 0);
+        emit_instruction(
+            compiler->function,
+            BC_CONST,
+            add_constant(compiler->function, value_string("prototype"))
+        );
+        get_index = emit_instruction(compiler->function, BC_GET_INDEX, 0);
+        set_instruction_location(compiler->function, get_index, method->line, method->column, 1);
+        emit_instruction(
+            compiler->function,
+            BC_CONST,
+            add_constant(compiler->function, value_string(method->name))
+        );
+        emit_instruction(compiler->function, BC_MAKE_FUNCTION, method_index);
+        set_index = emit_instruction(compiler->function, BC_SET_INDEX, 0);
+        set_instruction_location(compiler->function, set_index, method->line, method->column, 1);
+        emit_instruction(compiler->function, BC_POP, 0);
+    }
+
+    emit_instruction(compiler->function, BC_POP, 0);
     return true;
 }
 
@@ -648,6 +734,7 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                     expr->as.function.name,
                     &expr->as.function.params,
                     &expr->as.function.body,
+                    false,
                     expr->line,
                     expr->column,
                     error_message,
@@ -1049,6 +1136,7 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
                     stmt->as.function.name,
                     &stmt->as.function.params,
                     &stmt->as.function.body,
+                    false,
                     stmt->line,
                     stmt->column,
                     error_message,
@@ -1066,6 +1154,8 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
             emit_instruction(compiler->function, BC_STORE_LOCAL, (int)(compiler->locals[compiler->local_count - 1U].slot));
             return true;
         }
+        case STMT_CLASS:
+            return compile_class_statement(compiler, stmt, error_message);
         case STMT_RETURN:
             if (stmt->as.return_stmt.value != NULL) {
                 if (!compile_expression(compiler, stmt->as.return_stmt.value, error_message)) {

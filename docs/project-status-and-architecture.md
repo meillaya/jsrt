@@ -1,6 +1,6 @@
 # jsrt — Current Theory, Architecture, and Implementation Status
 
-This document is the **current-state overview** for `jsrt` as of **2026-04-21**. It complements the milestone-local notes in `docs/` and the planning artifacts under `.omx/plans/`.
+This document is the **current-state overview** for `jsrt` as of **2026-04-23**. It complements the milestone-local notes in `docs/` and the planning artifacts under `.omx/plans/`.
 
 Older milestone docs such as `docs/vm-parity-backend.md` capture the scope of a specific milestone at the time it was written. This file is the best place to understand what the repository implements **today**.
 
@@ -89,14 +89,14 @@ Supported token families include:
 
 ```text
 literals: number, string, true, false, null
-keywords: let, const, function, return, if, else, do, for, while,
-          switch, case, default, break, continue, this, new
+keywords: let, const, function, class, extends, super, return, if, else,
+          do, for, while, switch, case, default, break, continue, this, new
 operators: + - * / ! == != < <= > >= && || = . [ ] { } ( ) : ; ,
 ```
 
 ### 4.2 Parser
 
-The parser is a hand-written recursive-descent parser. It constructs an explicit AST with dedicated node kinds for literals, variables, unary/binary/logical expressions, calls, `this`, bounded `new`, function expressions, arrays, objects, indexing, property access, declarations, blocks, loops, `switch`, and control-flow statements.
+The parser is a hand-written recursive-descent parser. It constructs an explicit AST with dedicated node kinds for literals, variables, unary/binary/logical expressions, calls, `this`, bounded `new`, function expressions, arrays, objects, indexing, property access, bounded class declarations, declarations, blocks, loops, `switch`, and control-flow statements.
 
 Relevant files:
 - `src/parser.c`
@@ -239,6 +239,7 @@ Achieved so far:
 - variables, assignment, functions, closures, and function expressions
 - strings, arrays, objects, and shared-reference aggregate semantics
 - bounded `this` binding, constructor calls, and parenthesized `new`
+- bounded class declarations lowered onto the constructor/prototype runtime
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - `const` declarations
 - built-ins `print`, `len`, and `typeOf`
@@ -296,7 +297,7 @@ The project is intentionally incomplete. That is a feature, not a flaw, because 
 
 Still outside scope today:
 - modules and multi-file execution
-- classes and `super`
+- `extends` / `super` and the broader ES class surface beyond bounded declarations + constructor + instance methods
 - general function-object property bags beyond the narrow constructor `prototype` slot
 - async/event loop semantics
 - broad ECMAScript coercion and compatibility
@@ -395,7 +396,7 @@ The immediate next major milestones are no longer basic language features. The c
 ### Larger long-horizon targets
 
 ```text
-L4  class syntax and desugaring/direct support
+L4  bounded class syntax and desugaring/direct support (landed: declarations + constructor + instance methods)
 L5  module system (import/export)
 L6  embeddable host API
 L7  async/event-loop experiment

@@ -147,6 +147,28 @@ void run_parser_tests(TestContext *ctx) {
     EXPECT_INT_EQ(ctx, program.items[3]->as.expr.expression->as.assign.target->as.property.target->kind, EXPR_THIS);
     stmt_array_free(&program);
 
+    program = parse_program_or_fail(ctx,
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "  set() { return 1; }\n"
+        "}\n"
+        "class Empty { value() { return 1; } }\n"
+    );
+    EXPECT_SIZE_EQ(ctx, program.count, 2U);
+    EXPECT_INT_EQ(ctx, program.items[0]->kind, STMT_CLASS);
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.class_stmt.name, "Box");
+    EXPECT_SIZE_EQ(ctx, program.items[0]->as.class_stmt.methods.count, 3U);
+    EXPECT_TRUE(ctx, program.items[0]->as.class_stmt.methods.items[0].is_constructor);
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.class_stmt.methods.items[1].name, "get");
+    EXPECT_FALSE(ctx, program.items[0]->as.class_stmt.methods.items[1].is_constructor);
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.class_stmt.methods.items[2].name, "set");
+    EXPECT_INT_EQ(ctx, program.items[1]->kind, STMT_CLASS);
+    EXPECT_SIZE_EQ(ctx, program.items[1]->as.class_stmt.methods.count, 1U);
+    EXPECT_FALSE(ctx, program.items[1]->as.class_stmt.methods.items[0].is_constructor);
+    EXPECT_STRING_EQ(ctx, program.items[1]->as.class_stmt.methods.items[0].name, "value");
+    stmt_array_free(&program);
+
     {
         TokenArray tokens;
         char *error = NULL;
@@ -290,6 +312,76 @@ void run_parser_tests(TestContext *ctx) {
         if (error != NULL) {
             free(error);
         }
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("class Box extends Base {}", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box extends Base {}", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "extends is unsupported in L4 classes") != NULL);
+        free(error);
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("class Box { constructor() {} constructor(v) {} }", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { constructor() {} constructor(v) {} }", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "duplicate constructor definitions are unsupported") != NULL);
+        free(error);
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("class Box { static foo() {} }", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { static foo() {} }", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "static class members are unsupported in L4") != NULL);
+        free(error);
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("class Box { get foo() {} }", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { get foo() {} }", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "getter syntax is unsupported in L4 classes") != NULL);
+        free(error);
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("class Box { value; }", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { value; }", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "class fields are unsupported in L4") != NULL);
+        free(error);
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("class Box { [name]() {} }", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { [name]() {} }", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "computed method names are unsupported in L4 classes") != NULL);
+        free(error);
+        token_array_free(&tokens);
+
+        EXPECT_TRUE(ctx, lex_source("let Box = class {};", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "let Box = class {};", &program, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "class expressions are unsupported in L4") != NULL);
+        free(error);
         token_array_free(&tokens);
     }
 }

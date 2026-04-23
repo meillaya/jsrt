@@ -51,6 +51,9 @@ typedef enum {
     BUILTIN_SET_PROTOTYPE_OF
 } BuiltinKind;
 
+static const StringArray EMPTY_PARAMS = {NULL, 0U, 0U};
+static const StmtArray EMPTY_BODY = {NULL, 0U, 0U};
+
 static EvalResult result_ok(Value value) {
     EvalResult result;
     result.had_error = false;
@@ -174,12 +177,24 @@ static JsObject *create_object(size_t count) {
     return object;
 }
 
-static JsFunction *create_user_function(const Stmt *declaration, const Expr *expression, Env *closure) {
+static JsFunction *create_user_function(
+    const char *name,
+    const StringArray *params,
+    const StmtArray *body,
+    const Stmt *declaration,
+    const Expr *expression,
+    Env *closure,
+    bool is_class_constructor
+) {
     JsFunction *function = jsrt_malloc(sizeof(*function));
     gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
     function->is_native = false;
+    function->is_class_constructor = is_class_constructor;
     function->declaration = declaration;
     function->expression = expression;
+    function->name = name;
+    function->params = params;
+    function->body = body;
     function->closure = closure;
     function->native_name = NULL;
     function->native_arity = 0U;
@@ -194,8 +209,12 @@ static JsFunction *create_native_function(const char *name, size_t arity, Builti
     JsFunction *function = jsrt_malloc(sizeof(*function));
     gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
     function->is_native = true;
+    function->is_class_constructor = false;
     function->declaration = (const Stmt *)(size_t)(kind + 1);
     function->expression = NULL;
+    function->name = name;
+    function->params = NULL;
+    function->body = NULL;
     function->closure = NULL;
     function->native_name = name;
     function->native_arity = arity;
@@ -214,39 +233,21 @@ static const char *js_function_name(const JsFunction *function) {
     if (function->is_native) {
         return function->native_name;
     }
-    if (function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
-        return function->declaration->as.function.name;
-    }
-    if (function->expression != NULL) {
-        return function->expression->as.function.name;
-    }
-    return NULL;
+    return function->name;
 }
 
 static const StringArray *js_function_params(const JsFunction *function) {
     if (function->is_native) {
         return NULL;
     }
-    if (function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
-        return &function->declaration->as.function.params;
-    }
-    if (function->expression != NULL) {
-        return &function->expression->as.function.params;
-    }
-    return NULL;
+    return function->params;
 }
 
 static const StmtArray *js_function_body(const JsFunction *function) {
     if (function->is_native) {
         return NULL;
     }
-    if (function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
-        return &function->declaration->as.function.body;
-    }
-    if (function->expression != NULL) {
-        return &function->expression->as.function.body;
-    }
-    return NULL;
+    return function->body;
 }
 
 static const char *value_type_name(Value value) {
@@ -1288,6 +1289,16 @@ static EvalResult invoke_function(
             "native functions are not constructors"
         );
     }
+    if (!is_constructor && function->is_class_constructor) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            surface_expr->line,
+            surface_expr->column,
+            1,
+            "class constructors must be called with 'new'"
+        );
+    }
     if (!function->is_native && (params == NULL || body == NULL)) {
         return result_runtime_error_at(
             evaluator,
@@ -1736,7 +1747,15 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
         case EXPR_NEW:
             return eval_new(evaluator, expr);
         case EXPR_FUNCTION: {
-            JsFunction *function = create_user_function(NULL, expr, evaluator->env);
+            JsFunction *function = create_user_function(
+                expr->as.function.name,
+                &expr->as.function.params,
+                &expr->as.function.body,
+                NULL,
+                expr,
+                evaluator->env,
+                false
+            );
             return result_ok(value_function(function));
         }
         case EXPR_ARRAY:
@@ -1949,7 +1968,15 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
             }
         }
         case STMT_FUNCTION: {
-            JsFunction *function = create_user_function(stmt, NULL, evaluator->env);
+            JsFunction *function = create_user_function(
+                stmt->as.function.name,
+                &stmt->as.function.params,
+                &stmt->as.function.body,
+                stmt,
+                NULL,
+                evaluator->env,
+                false
+            );
             {
                 Value fn_value = value_function(function);
                 if (!env_define(evaluator->env, stmt->as.function.name, fn_value, true)) {
@@ -1965,6 +1992,62 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
                 }
                 value_free(fn_value);
             }
+            return result_ok(value_null());
+        }
+        case STMT_CLASS: {
+            const ClassMethod *constructor = NULL;
+            JsFunction *function;
+            Value class_value;
+            size_t i;
+
+            for (i = 0; i < stmt->as.class_stmt.methods.count; ++i) {
+                if (stmt->as.class_stmt.methods.items[i].is_constructor) {
+                    constructor = &stmt->as.class_stmt.methods.items[i];
+                    break;
+                }
+            }
+
+            function = create_user_function(
+                stmt->as.class_stmt.name,
+                constructor != NULL ? &constructor->params : &EMPTY_PARAMS,
+                constructor != NULL ? &constructor->body : &EMPTY_BODY,
+                stmt,
+                NULL,
+                evaluator->env,
+                true
+            );
+            class_value = value_function(function);
+            if (!env_define(evaluator->env, stmt->as.class_stmt.name, class_value, true)) {
+                value_free(class_value);
+                return result_runtime_error_at_take(
+                    evaluator,
+                    RUNTIME_ERROR_NAME,
+                    stmt->line,
+                    stmt->column,
+                    (int)strlen(stmt->as.class_stmt.name),
+                    jsrt_format("redeclaration of '%s' in the same scope", stmt->as.class_stmt.name)
+                );
+            }
+
+            for (i = 0; i < stmt->as.class_stmt.methods.count; ++i) {
+                const ClassMethod *method = &stmt->as.class_stmt.methods.items[i];
+                if (!method->is_constructor) {
+                    JsFunction *method_function = create_user_function(
+                        method->name,
+                        &method->params,
+                        &method->body,
+                        NULL,
+                        NULL,
+                        evaluator->env,
+                        false
+                    );
+                    Value method_value = value_function(method_function);
+                    object_set_key(function->prototype.as.object, method->name, method_value);
+                    value_free(method_value);
+                }
+            }
+
+            value_free(class_value);
             return result_ok(value_null());
         }
         case STMT_RETURN: {

@@ -4,10 +4,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "jsrt/ast.h"
 #include "jsrt/gc.h"
 
-struct Expr;
-struct Stmt;
 struct BytecodeFunction;
 typedef struct Env Env;
 typedef struct JsArray JsArray;
@@ -41,8 +40,12 @@ typedef struct Value {
 struct JsFunction {
     GcHeader gc;
     bool is_native;
+    bool is_class_constructor;
     const struct Stmt *declaration;
     const struct Expr *expression;
+    const char *name;
+    const StringArray *params;
+    const StmtArray *body;
     Env *closure;
     const char *native_name;
     size_t native_arity;

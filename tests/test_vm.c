@@ -427,6 +427,77 @@ void run_vm_tests(TestContext *ctx) {
         "let out = new KeepNull();\n"
         "out.value;\n"
     );
+    assert_backend_parity(
+        ctx,
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "  twice() { return this.get() + this.get(); }\n"
+        "}\n"
+        "let box = new Box(3);\n"
+        "box.twice();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "class Empty {\n"
+        "  get() { return 7; }\n"
+        "}\n"
+        "let box = new Empty();\n"
+        "box.get();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { if (this == null) { return 1; } return this.value; }\n"
+        "}\n"
+        "let box = new Box(4);\n"
+        "let f = box.get;\n"
+        "f();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return 0; }\n"
+        "}\n"
+        "let proto = {get: function () { return this.value; }};\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(9);\n"
+        "Box[\"prototype\"] == proto && box.get() == 9;\n"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "class Box { constructor(v) { this.value = v; } }\n"
+        "Box(1);\n",
+        "class constructors must be called with 'new'"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "Box;\n"
+        "class Box {}\n",
+        "undefined variable 'Box'"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "{ class Local {} }\n"
+        "Local;\n",
+        "undefined variable 'Local'"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "class Box {}\n"
+        "class Box {}\n",
+        "redeclaration of 'Box' in the same scope"
+    );
+    assert_backend_error_contains(ctx, "class Box extends Base {}\n", "extends is unsupported in L4 classes");
+    assert_backend_error_contains(ctx, "class Box { super(); }\n", "super is unsupported in L4 classes");
+    assert_backend_error_contains(ctx, "class Box { static foo() {} }\n", "static class members are unsupported in L4");
+    assert_backend_error_contains(ctx, "class Box { get value() {} }\n", "getter syntax is unsupported in L4 classes");
+    assert_backend_error_contains(ctx, "class Box { set value(v) {} }\n", "setter syntax is unsupported in L4 classes");
+    assert_backend_error_contains(ctx, "class Box { field = 1; }\n", "class fields are unsupported in L4");
+    assert_backend_error_contains(ctx, "class Box { [\"value\"]() {} }\n", "computed method names are unsupported in L4 classes");
+    assert_backend_error_contains(ctx, "let Box = class {};\n", "class expressions are unsupported in L4");
     assert_backend_parity(ctx, "print.prototype;\n");
     assert_backend_parity(
         ctx,
@@ -482,6 +553,46 @@ void run_vm_tests(TestContext *ctx) {
     assert_backend_error_contains(ctx, "function Box() {}\nBox[0];\n", "only function.prototype is supported in L3");
     assert_backend_error_contains(ctx, "function Box() {}\nBox.x = 1;\n", "only function.prototype is supported in L3");
     assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"] = 1;\n", "only function.prototype is supported in L3");
+    assert_backend_parity(
+        ctx,
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "  read() { return this.get(); }\n"
+        "}\n"
+        "let box = new Box(3);\n"
+        "box.read();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "class Empty { get() { return this.value; } }\n"
+        "let box = new Empty();\n"
+        "box.value = 4;\n"
+        "box.get == Empty.prototype.get && box.get() == 4;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "class Box { get() { if (this == null) { return 1; } return this.value; } }\n"
+        "let box = new Box();\n"
+        "box.value = 4;\n"
+        "let f = box.get;\n"
+        "f();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "class Box {\n"
+        "  constructor(v) { this.value = v; }\n"
+        "  get() { return this.value; }\n"
+        "}\n"
+        "let proto = {get: function () { return 8; }};\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(2);\n"
+        "Box.prototype == proto && box.get() == 8;\n"
+    );
+    assert_backend_error_contains(ctx, "class Box {}\nBox();\n", "class constructors must be called with 'new'");
+    assert_backend_error_contains(ctx, "Box;\nclass Box {}\n", "undefined variable 'Box'");
+    assert_backend_error_contains(ctx, "if (true) { class Box {} }\nBox;\n", "undefined variable 'Box'");
+    assert_backend_error_contains(ctx, "class Box {}\nclass Box {}\n", "redeclaration of 'Box' in the same scope");
 
     {
         char *error = NULL;
@@ -578,6 +689,19 @@ void run_vm_tests(TestContext *ctx) {
         if (file != NULL) {
             EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
             EXPECT_STRING_EQ(ctx, buffer, "1:new:8:7\n");
+            fclose(file);
+        }
+    }
+
+    {
+        FILE *file;
+        char buffer[128];
+        EXPECT_INT_EQ(ctx, system("JSRT_BACKEND=vm ./build/jsrt examples/class_syntax.js > build/class-example.out"), 0);
+        file = fopen("build/class-example.out", "r");
+        EXPECT_TRUE(ctx, file != NULL);
+        if (file != NULL) {
+            EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
+            EXPECT_STRING_EQ(ctx, buffer, "7:true\n");
             fclose(file);
         }
     }

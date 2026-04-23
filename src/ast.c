@@ -110,6 +110,34 @@ void switch_case_array_free(SwitchCaseArray *array) {
     array->capacity = 0;
 }
 
+void class_method_array_init(ClassMethodArray *array) {
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+void class_method_array_push(ClassMethodArray *array, ClassMethod method) {
+    if (array->count == array->capacity) {
+        size_t next_capacity = array->capacity == 0 ? 8U : array->capacity * 2U;
+        array->items = jsrt_realloc(array->items, next_capacity * sizeof(*array->items));
+        array->capacity = next_capacity;
+    }
+    array->items[array->count++] = method;
+}
+
+void class_method_array_free(ClassMethodArray *array) {
+    size_t i;
+    for (i = 0; i < array->count; ++i) {
+        free(array->items[i].name);
+        string_array_free(&array->items[i].params);
+        stmt_array_free(&array->items[i].body);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
 void stmt_array_init(StmtArray *array) {
     array->items = NULL;
     array->count = 0;
@@ -342,6 +370,13 @@ Stmt *ast_new_function_stmt(const char *name, StringArray params, StmtArray body
     return stmt;
 }
 
+Stmt *ast_new_class_stmt(const char *name, ClassMethodArray methods, int line, int column) {
+    Stmt *stmt = alloc_stmt(STMT_CLASS, line, column);
+    stmt->as.class_stmt.name = jsrt_strdup(name);
+    stmt->as.class_stmt.methods = methods;
+    return stmt;
+}
+
 Stmt *ast_new_return_stmt(Expr *value, int line, int column) {
     Stmt *stmt = alloc_stmt(STMT_RETURN, line, column);
     stmt->as.return_stmt.value = value;
@@ -462,6 +497,10 @@ void stmt_destroy(Stmt *stmt) {
             free(stmt->as.function.name);
             string_array_free(&stmt->as.function.params);
             stmt_array_free(&stmt->as.function.body);
+            break;
+        case STMT_CLASS:
+            free(stmt->as.class_stmt.name);
+            class_method_array_free(&stmt->as.class_stmt.methods);
             break;
         case STMT_RETURN:
             expr_destroy(stmt->as.return_stmt.value);
