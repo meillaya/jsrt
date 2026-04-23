@@ -35,7 +35,7 @@ Document-role boundaries:
 | M5 — Exceptionless structured runtime error model | DONE | Evidence | `docs/runtime-error-model.md`; `tests/test_diagnostics.c`; `src/eval.c` | Structured runtime error categories and source-based reporting are current behavior. |
 | M6 — Bytecode / IR architecture spike | DONE | Evidence | `docs/bytecode-ir-architecture-spike.md`; `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | Design/ADR milestone: backend direction artifact exists and handed off to M7/M8. |
 | M7 — Bytecode compiler MVP | DONE | Evidence | `docs/bytecode-compiler-mvp.md`; `src/compiler.c`; `tests/test_bytecode.c` | Compiler and disassembler are present and documented. |
-| M8 — VM interpreter parity backend | DONE | Evidence | `docs/vm-parity-backend.md`; `README.md`; `src/vm.c`; `tests/test_vm.c` | Opt-in VM backend exists and is documented as a bounded parity-tested surface. |
+| M8 — VM interpreter parity backend | DONE | Evidence | `docs/vm-parity-backend.md`; `docs/milestone-verification-checklist.md`; `README.md`; `src/vm.c`; `tests/test_vm.c` | Opt-in VM backend exists and now has an explicit closure record for the original bounded parity milestone. |
 | M9 — VM surface widening I | DONE | Evidence + Inference | `docs/vm-parity-backend.md`; `docs/project-status-and-architecture.md`; `tests/test_vm.c` | The current bounded VM subset already includes aggregate operations plus the structured control-flow gaps (`do...while`, `switch`, `break`, `continue`), so the planned M9 widening scope is now subsumed by the shipped backend surface. |
 | M10 — VM closure + function-expression parity | DONE | Evidence + Inference | `docs/vm-parity-backend.md`; `docs/project-status-and-architecture.md`; `src/compiler.c`; `tests/test_vm.c`; `tests/test_bytecode.c` | The current bounded VM/compiler surface already includes function expressions, closure capture, and upvalue lowering, so the planned M10 parity scope is now subsumed by the shipped backend surface. |
 | L1 — Benchmark and profiling harness | DONE | Evidence | `docs/benchmark-and-profiling-harness.md`; `benchmarks/manifest.csv`; `benchmarks/baseline.csv`; `scripts/benchmark.sh`; `Makefile` | Benchmark fixtures, manifest, schema, baseline CSV, script, and Make targets are all checked in. |
@@ -60,13 +60,14 @@ These milestones have a repo-local artifact that directly records completion or 
 | N7 — General heap GC architecture spike | `.omx/plans/adr-javascript-runtime-n7-general-heap-gc.md` | ADR says it is **accepted for roadmap handoff to N8**, which is the completion artifact for this design milestone. |
 | M2 — Aggregate semantics ADR (`copy` vs `reference`) | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md` | ADR says it is **accepted for roadmap handoff to M3**, which is the completion artifact for this design milestone. |
 | M6 — Bytecode / IR architecture spike | `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | ADR says it is **accepted for roadmap handoff to M7/M8**, which is the completion artifact for this design milestone. |
+| M8 — VM interpreter parity backend | `docs/milestone-verification-checklist.md` | Contains the **M8 closure record — 2026-04-23** with retained parity/backend-switch/ASan evidence for the original bounded M8 surface. |
 | L4 — Class syntax and desugaring/direct support | `docs/milestone-verification-checklist.md` | Contains the **L4 closure record — 2026-04-23** with retained evidence and checked exit gates. |
 
 ### DONE rows backed by current-state synthesis instead of a single closure artifact
 
 These milestones are marked `DONE` because the current repo clearly ships their bounded surface, but there is no single dedicated closure record currently serving as the milestone’s canonical completion artifact:
 
-`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N8`, `M1`, `M3`, `M4`, `M5`, `M7`, `M8`, `M9`, `M10`, `L1`, `L2`, `L3`
+`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N8`, `M1`, `M3`, `M4`, `M5`, `M7`, `M9`, `M10`, `L1`, `L2`, `L3`
 
 For these rows, the ledger relies on the cited current-state docs, examples, tests, and implementation files rather than a standalone milestone-closure record.
 

@@ -151,3 +151,59 @@ Generic prerequisite/evidence/completion gates were satisfied for L4 via the app
 - Treat `extends` / `super` as later work requiring explicit superclass/home-object metadata and possibly wider function heritage affordances.
 - Reassess after L4 whether a later L4.x follow-up should own inheritance/static surface separately.
 - Do not widen the class surface without revisiting the approved L4 PRD and test spec.
+
+## M8 closure record — 2026-04-23
+
+This section formally closes the bounded **M8 — VM interpreter parity backend** milestone against its approved PRD/test-spec and the retained repo evidence below.
+
+This closure record applies to the **initial bounded M8 subset**. Later milestones widened the backend surface further, but that later work does not replace the need to record that the original opt-in VM/parity milestone itself landed and was verified.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `JSRT_BACKEND=vm ./build/jsrt examples/vm_subset.js` → `number:5:12`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1035 assertions`
+- Tree-walk vs VM parity coverage is retained in `tests/test_vm.c`.
+- Current-facing milestone companion and contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+  - `docs/vm-parity-backend.md`
+
+### Changed files in the M8 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m8-vm-interpreter-parity-backend.md`
+- `Makefile`
+- `README.md`
+- `docs/semantics-baseline.md`
+- `docs/vm-parity-backend.md`
+- `examples/vm_subset.js`
+- `include/jsrt/bytecode.h`
+- `include/jsrt/value.h`
+- `include/jsrt/vm.h`
+- `src/compiler.c`
+- `src/eval.c`
+- `src/main.c`
+- `src/value.c`
+- `src/vm.c`
+- `tests/test.h`
+- `tests/test_runner.c`
+- `tests/test_vm.c`
+
+### Simplifications made
+
+- Kept tree-walk as the semantic authority instead of promoting the VM to default execution.
+- Kept M8 bounded to an opt-in backend with explicit parity evidence rather than pretending full-language VM parity.
+- Used an explicit CLI backend switch (`JSRT_BACKEND=vm`) instead of introducing a more complex runtime-selection surface.
+
+### Remaining risks
+
+- The original M8 subset was intentionally narrower than the current shipped VM surface; this closure should not be misread as proving full VM parity for every later-added feature.
+- Unsupported backend surface at the time of M8 still required explicit compiler/backend failures rather than silent fallback behavior.
+- Broader closure/upvalue hardening and later surface widening were still follow-up work at the original M8 boundary.
+
+### Milestone-specific follow-ups
+
+- Keep tree-walk as the semantic oracle unless broader parity evidence justifies any future promotion.
+- Treat later VM widening (`M9`, `M10`) as distinct follow-on closure work rather than retroactively inflating M8.
+- Keep unsupported backend surface explicit until it is truly parity-tested.
