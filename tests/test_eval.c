@@ -125,6 +125,75 @@ void run_eval_tests(TestContext *ctx) {
     value_free(result.value);
     eval_result_free(&result);
 
+    result = evaluate_source(
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.name;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "base");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let grand = {name: \"root\"};\n"
+        "let proto = {};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(proto, grand);\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.name;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "root");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.name = \"child\";\n"
+        "proto.name + \":\" + obj.name;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "base:child");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let proto = {nested: {value: 0}};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.nested.value = 1;\n"
+        "len(obj) + \":\" + proto.nested.value + \":\" + obj.nested.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "0:1:1");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let proto = {speak: function () { return 7; }};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.speak();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 7.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
     result = evaluate_source("len(\"hello\");\n", &error);
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
@@ -143,6 +212,19 @@ void run_eval_tests(TestContext *ctx) {
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
     EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 2.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let proto = {hidden: 1};\n"
+        "let obj = {shown: 2};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "len(obj);\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1.0);
     value_free(result.value);
     eval_result_free(&result);
 
@@ -167,6 +249,38 @@ void run_eval_tests(TestContext *ctx) {
     value_free(result.value);
     eval_result_free(&result);
 
+    result = evaluate_source(
+        "let protoA = {kind: \"a\"};\n"
+        "let protoB = {kind: \"b\"};\n"
+        "let left = {name: \"same\"};\n"
+        "let right = {name: \"same\"};\n"
+        "setPrototypeOf(left, protoA);\n"
+        "setPrototypeOf(right, protoB);\n"
+        "left == right;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let proto = {hidden: 1};\n"
+        "let obj = {shown: 2};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    {
+        char *text = value_to_string(result.value);
+        EXPECT_STRING_EQ(ctx, text, "{shown: 2}");
+        free(text);
+    }
+    value_free(result.value);
+    eval_result_free(&result);
+
     result = evaluate_source("let arr = [1]; arr[3];\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
     EXPECT_TRUE(ctx, strstr(result.error_message, "array index out of bounds") != NULL);
@@ -177,9 +291,46 @@ void run_eval_tests(TestContext *ctx) {
     EXPECT_TRUE(ctx, strstr(result.error_message, "object key 'missing' not found") != NULL);
     eval_result_free(&result);
 
+    result = evaluate_source(
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.missing;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "object key 'missing' not found") != NULL);
+    eval_result_free(&result);
+
     result = evaluate_source("let obj = {name: \"jsrt\"}; obj[1];\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
     EXPECT_TRUE(ctx, strstr(result.error_message, "object indexing expects a string key") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("setPrototypeOf(1, {});\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "setPrototypeOf() expects an object receiver") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("setPrototypeOf({}, 1);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "setPrototypeOf() expects an object or null prototype") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("let obj = {}; setPrototypeOf(obj, obj);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "setPrototypeOf() cannot set an object as its own prototype") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let a = {};\n"
+        "let b = {};\n"
+        "setPrototypeOf(a, b);\n"
+        "setPrototypeOf(b, a);\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "setPrototypeOf() cannot create a prototype cycle") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source(
