@@ -154,6 +154,18 @@ void run_eval_tests(TestContext *ctx) {
     eval_result_free(&result);
 
     result = evaluate_source(
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "setPrototypeOf(obj, null);\n"
+        "obj.name;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "object key 'name' not found") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
         "let grand = {name: \"root\"};\n"
         "let proto = {};\n"
         "let obj = {};\n"
@@ -179,6 +191,20 @@ void run_eval_tests(TestContext *ctx) {
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
     EXPECT_STRING_EQ(ctx, result.value.as.string, "base:child");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let obj = {name: \"receiver\"};\n"
+        "let proto = {name: \"proto\"};\n"
+        "let returned = setPrototypeOf(obj, proto);\n"
+        "returned.extra = 7;\n"
+        "obj.extra + \":\" + returned.extra + \":\" + proto.name;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "7:7:proto");
     value_free(result.value);
     eval_result_free(&result);
 

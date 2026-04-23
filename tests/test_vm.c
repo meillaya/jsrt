@@ -299,6 +299,15 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(obj, proto);\n"
         "obj.name;\n"
     );
+    assert_backend_error_contains(
+        ctx,
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "setPrototypeOf(obj, null);\n"
+        "obj.name;\n",
+        "object key 'name' not found"
+    );
     assert_backend_parity(
         ctx,
         "let grand = {name: \"root\"};\n"
@@ -315,6 +324,14 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(obj, proto);\n"
         "obj.name = \"child\";\n"
         "proto.name + \":\" + obj.name;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let obj = {name: \"receiver\"};\n"
+        "let proto = {name: \"proto\"};\n"
+        "let returned = setPrototypeOf(obj, proto);\n"
+        "returned.extra = 7;\n"
+        "obj.extra + \":\" + returned.extra + \":\" + proto.name;\n"
     );
     assert_backend_parity(
         ctx,

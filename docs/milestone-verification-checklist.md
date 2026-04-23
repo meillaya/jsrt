@@ -34,7 +34,7 @@ make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclu
 Use this addendum when verifying the bounded L2 milestone. L2 is done only when the new lookup model lands **without** leaking L3 semantics.
 
 - [ ] prototype linkage is explicit and bounded (for example `setPrototypeOf(obj, protoOrNull)`), with negative coverage for invalid receiver/prototype values, self-linking, and cycles
-- [ ] property reads are verified as own-first, then prototype-chain lookup, including multi-hop lookup and full-chain miss diagnostics
+- [ ] property reads are verified as own-first, then prototype-chain lookup, including multi-hop lookup and full-chain miss failure/message coverage
 - [ ] direct writes remain receiver-only; shadowing creates/updates own properties instead of mutating prototype-owned entries
 - [ ] inherited intermediate-container assignment is covered explicitly: inherited container reads may resolve through the prototype chain, but the final write mutates only the resolved container and does not invent an own receiver-local container
 - [ ] method dispatch is still plain-function invocation after prototype-aware lookup; no implicit `this`, constructor behavior, `new`, or class semantics are introduced

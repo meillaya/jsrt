@@ -28,7 +28,7 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 | `print(value)` | writes the value's string form plus newline, returns `null` | `tests/test_eval.c`, `examples/builtins.js` |
 | `len(value)` | returns length/count for strings, arrays, and objects | `tests/test_eval.c`, `src/eval.c` |
 | `typeOf(value)` | returns stable runtime type labels | `tests/test_eval.c`, `src/eval.c` |
-| `setPrototypeOf(object, protoOrNull)` | sets or clears an object's prototype, returns the receiver, and rejects non-object receivers, invalid prototype values, self-links, and prototype cycles | `src/eval.c`, `src/vm.c` |
+| `setPrototypeOf(object, protoOrNull)` | sets or clears an object's prototype, returns the receiver, and rejects non-object receivers, invalid prototype values, self-links, and prototype cycles | `tests/test_eval.c`, `tests/test_vm.c`, `src/eval.c`, `src/vm.c` |
 
 ## Control flow baseline
 
