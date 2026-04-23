@@ -13,6 +13,8 @@ Document-role boundaries:
 
 - **Basis = Evidence** means the status is directly supported by current repo sources.
 - **Basis = Evidence + Inference** means the repo contains strong current evidence, but the exact milestone closure is synthesized across multiple sources rather than stated in one single closure record.
+- **Explicit closure artifact** means the repo contains a milestone-specific completion/handoff artifact that directly records closure (for example an accepted ADR handoff or a checklist closure record).
+- **Current-state synthesis** means the repo clearly ships the milestone’s bounded surface today, but the ledger is inferring milestone completion from shipped docs/code/tests rather than pointing at one dedicated closure artifact.
 
 ## Milestone ledger
 
@@ -46,6 +48,27 @@ Document-role boundaries:
 | L8 — Regex + richer standard library | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `README.md`; `docs/built-in-library-foundation.md` | Current stdlib remains intentionally narrow and no regex support is claimed in current-state docs. |
 | L9 — Conformance subset harness | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/project-status-and-architecture.md` | The repo still treats broad compatibility work as future-facing rather than providing a conformance harness today. |
 | L10 — Optional JIT / advanced optimization feasibility study | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/project-status-and-architecture.md` | JIT/advanced optimization work remains explicitly outside current scope. |
+
+## DONE milestone closure provenance
+
+### DONE rows backed by explicit closure artifacts
+
+These milestones have a repo-local artifact that directly records completion or formal handoff:
+
+| Milestone | Explicit closure artifact | Notes |
+|---|---|---|
+| N7 — General heap GC architecture spike | `.omx/plans/adr-javascript-runtime-n7-general-heap-gc.md` | ADR says it is **accepted for roadmap handoff to N8**, which is the completion artifact for this design milestone. |
+| M2 — Aggregate semantics ADR (`copy` vs `reference`) | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md` | ADR says it is **accepted for roadmap handoff to M3**, which is the completion artifact for this design milestone. |
+| M6 — Bytecode / IR architecture spike | `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | ADR says it is **accepted for roadmap handoff to M7/M8**, which is the completion artifact for this design milestone. |
+| L4 — Class syntax and desugaring/direct support | `docs/milestone-verification-checklist.md` | Contains the **L4 closure record — 2026-04-23** with retained evidence and checked exit gates. |
+
+### DONE rows backed by current-state synthesis instead of a single closure artifact
+
+These milestones are marked `DONE` because the current repo clearly ships their bounded surface, but there is no single dedicated closure record currently serving as the milestone’s canonical completion artifact:
+
+`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `N8`, `M1`, `M3`, `M4`, `M5`, `M7`, `M8`, `M9`, `M10`, `L1`, `L2`, `L3`
+
+For these rows, the ledger relies on the cited current-state docs, examples, tests, and implementation files rather than a standalone milestone-closure record.
 
 ## Stale / superseded source statements appendix
 
