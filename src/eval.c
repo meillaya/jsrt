@@ -46,7 +46,8 @@ typedef struct {
 typedef enum {
     BUILTIN_PRINT,
     BUILTIN_LEN,
-    BUILTIN_TYPEOF
+    BUILTIN_TYPEOF,
+    BUILTIN_SET_PROTOTYPE_OF
 } BuiltinKind;
 
 static EvalResult result_ok(Value value) {
@@ -275,6 +276,65 @@ static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, c
             }
         case BUILTIN_TYPEOF:
             return result_ok(value_string(value_type_name(arguments[0])));
+        case BUILTIN_SET_PROTOTYPE_OF: {
+            JsObject *receiver;
+            JsObject *prototype = NULL;
+
+            if (arguments[0].type != VALUE_OBJECT || arguments[0].as.object == NULL) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "setPrototypeOf() expects an object receiver"
+                );
+            }
+            if (arguments[1].type != VALUE_NULL &&
+                (arguments[1].type != VALUE_OBJECT || arguments[1].as.object == NULL)) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "setPrototypeOf() expects an object or null prototype"
+                );
+            }
+
+            receiver = arguments[0].as.object;
+            if (arguments[1].type == VALUE_OBJECT) {
+                prototype = arguments[1].as.object;
+            }
+
+            if (prototype == receiver) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_ASSIGNMENT,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "setPrototypeOf() cannot set an object as its own prototype"
+                );
+            }
+
+            while (prototype != NULL) {
+                if (prototype == receiver) {
+                    return result_runtime_error_at(
+                        evaluator,
+                        RUNTIME_ERROR_ASSIGNMENT,
+                        expr->line,
+                        expr->column,
+                        1,
+                        "setPrototypeOf() cannot create a prototype cycle"
+                    );
+                }
+                prototype = prototype->prototype;
+            }
+
+            receiver->prototype = arguments[1].type == VALUE_OBJECT ? arguments[1].as.object : NULL;
+            return result_ok(value_clone(arguments[0]));
+        }
     }
 
     return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported builtin function");
@@ -290,6 +350,7 @@ static void define_global_builtins(Env *env) {
     define_builtin(env, "print", 1U, BUILTIN_PRINT);
     define_builtin(env, "len", 1U, BUILTIN_LEN);
     define_builtin(env, "typeOf", 1U, BUILTIN_TYPEOF);
+    define_builtin(env, "setPrototypeOf", 2U, BUILTIN_SET_PROTOTYPE_OF);
 }
 
 static EvalResult execute_switch(Evaluator *evaluator, const Stmt *stmt) {
@@ -441,6 +502,26 @@ static void object_set_key(JsObject *object, const char *key, Value value) {
     object->count += 1U;
 }
 
+static bool object_lookup_key(JsObject *object, const char *key, JsObject **owner, ptrdiff_t *index) {
+    JsObject *current = object;
+
+    while (current != NULL) {
+        ptrdiff_t current_index = object_find_key(current, key);
+        if (current_index >= 0) {
+            if (owner != NULL) {
+                *owner = current;
+            }
+            if (index != NULL) {
+                *index = current_index;
+            }
+            return true;
+        }
+        current = current->prototype;
+    }
+
+    return false;
+}
+
 static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, const AssignPath *path, Value assigned_value) {
     GcTempRoot root_value_root;
     GcTempRoot assigned_value_root;
@@ -456,6 +537,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
 
         if (step->kind == ASSIGN_STEP_PROPERTY) {
             ptrdiff_t key_index;
+            JsObject *owner;
 
             if (current->type != VALUE_OBJECT) {
                 gc_temp_root_pop(&assigned_value_root);
@@ -470,14 +552,13 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                 );
             }
 
-            key_index = object_find_key(current->as.object, step->property_name);
             if (is_last) {
                 object_set_key(current->as.object, step->property_name, assigned_value);
                 gc_temp_root_pop(&assigned_value_root);
                 gc_temp_root_pop(&root_value_root);
                 return result_ok(value_null());
             }
-            if (key_index < 0) {
+            if (!object_lookup_key(current->as.object, step->property_name, &owner, &key_index)) {
                 gc_temp_root_pop(&assigned_value_root);
                 gc_temp_root_pop(&root_value_root);
                 return result_runtime_error_at_take(
@@ -489,7 +570,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     jsrt_format("object key '%s' not found", step->property_name)
                 );
             }
-            current = &current->as.object->items[key_index].value;
+            current = &owner->items[(size_t)key_index].value;
             continue;
         }
 
@@ -544,6 +625,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
 
             if (current->type == VALUE_OBJECT) {
                 ptrdiff_t key_index;
+                JsObject *owner;
                 if (index_result.value.type != VALUE_STRING) {
                     value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
@@ -565,7 +647,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     gc_temp_root_pop(&root_value_root);
                     return result_ok(value_null());
                 }
-                if (key_index < 0) {
+                if (!object_lookup_key(current->as.object, index_result.value.as.string, &owner, &key_index)) {
                     char *message = jsrt_format("object key '%s' not found", index_result.value.as.string);
                     value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
@@ -573,7 +655,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     return result_runtime_error_at_take(evaluator, RUNTIME_ERROR_LOOKUP, step->line, step->column, 1, message);
                 }
                 value_free(index_result.value);
-                current = &current->as.object->items[key_index].value;
+                current = &owner->items[(size_t)key_index].value;
                 continue;
             }
 
@@ -972,6 +1054,7 @@ static EvalResult eval_object_literal(Evaluator *evaluator, const Expr *expr) {
     gc_register_object(&object->gc, GC_OBJECT_OBJECT);
     object->count = expr->as.object.properties.count;
     object->items = jsrt_malloc(sizeof(*object->items) * object->count);
+    object->prototype = NULL;
     object_value = value_object_take(object);
     gc_temp_root_push_value(&object_root, &object_value);
     for (i = 0; i < object->count; ++i) {
@@ -1038,6 +1121,8 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
     }
 
     if (target.value.type == VALUE_OBJECT) {
+        ptrdiff_t key_index;
+        JsObject *owner;
         if (index.value.type != VALUE_STRING) {
             value_free(target.value);
             value_free(index.value);
@@ -1050,29 +1135,25 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
                 "object indexing expects a string key"
             );
         }
-        for (i = 0; i < target.value.as.object->count; ++i) {
-            if (strcmp(target.value.as.object->items[i].key, index.value.as.string) == 0) {
-                Value result = value_clone(target.value.as.object->items[i].value);
-                value_free(target.value);
-                value_free(index.value);
-                return result_ok(result);
-            }
+        if (object_lookup_key(target.value.as.object, index.value.as.string, &owner, &key_index)) {
+            Value result = value_clone(owner->items[(size_t)key_index].value);
+            value_free(target.value);
+            value_free(index.value);
+            return result_ok(result);
         }
-        value_free(target.value);
-        value_free(index.value);
-        return result_runtime_error_at_take(
-            evaluator,
-            RUNTIME_ERROR_LOOKUP,
-            expr->line,
-            expr->column,
-            1,
-            jsrt_format(
-                "object key '%s' not found",
-                expr->as.index.index->kind == EXPR_LITERAL && expr->as.index.index->as.literal.kind == LITERAL_STRING
-                    ? expr->as.index.index->as.literal.string
-                    : "?"
-            )
-        );
+        {
+            char *message = jsrt_format("object key '%s' not found", index.value.as.string);
+            value_free(target.value);
+            value_free(index.value);
+            return result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_LOOKUP,
+                expr->line,
+                expr->column,
+                1,
+                message
+            );
+        }
     }
 
     value_free(target.value);
@@ -1089,7 +1170,8 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
 
 static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
     EvalResult target = eval_expression(evaluator, expr->as.property.target);
-    size_t i;
+    ptrdiff_t key_index;
+    JsObject *owner;
     if (target.had_error) {
         return target;
     }
@@ -1104,12 +1186,10 @@ static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
             "property access requires an object value"
         );
     }
-    for (i = 0; i < target.value.as.object->count; ++i) {
-        if (strcmp(target.value.as.object->items[i].key, expr->as.property.name) == 0) {
-            Value result = value_clone(target.value.as.object->items[i].value);
-            value_free(target.value);
-            return result_ok(result);
-        }
+    if (object_lookup_key(target.value.as.object, expr->as.property.name, &owner, &key_index)) {
+        Value result = value_clone(owner->items[(size_t)key_index].value);
+        value_free(target.value);
+        return result_ok(result);
     }
     value_free(target.value);
     return result_runtime_error_at_take(

@@ -336,6 +336,9 @@ static void object_mark_reachable(JsObject *object) {
     for (i = 0; i < object->count; ++i) {
         value_mark_reachable(object->items[i].value);
     }
+    if (object->prototype != NULL) {
+        object_mark_reachable(object->prototype);
+    }
 }
 
 void value_mark_reachable(Value value) {
