@@ -263,6 +263,65 @@ static JsObject *create_function_prototype(void) {
     return create_object(0U);
 }
 
+static JsObject *create_object(size_t count) {
+    JsObject *object = jsrt_malloc(sizeof(*object));
+    size_t i;
+
+    gc_register_object(&object->gc, GC_OBJECT_OBJECT);
+    object->count = count;
+    object->items = jsrt_malloc(sizeof(*object->items) * count);
+    object->prototype = NULL;
+    for (i = 0; i < count; ++i) {
+        object->items[i].key = NULL;
+        object->items[i].value = value_null();
+    }
+    return object;
+}
+
+static bool value_is_construct_result(Value value) {
+    return value.type == VALUE_OBJECT || value.type == VALUE_ARRAY || value.type == VALUE_FUNCTION;
+}
+
+static EvalResult function_property_error(Evaluator *evaluator, int line, int column) {
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        line,
+        column,
+        1,
+        "function property access only supports 'prototype'"
+    );
+}
+
+static EvalResult function_prototype_assignment_error(Evaluator *evaluator, int line, int column) {
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        line,
+        column,
+        1,
+        "function prototype assignment expects an object or null value"
+    );
+}
+
+static EvalResult native_function_prototype_assignment_error(Evaluator *evaluator, int line, int column) {
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        line,
+        column,
+        1,
+        "native functions do not support prototype assignment"
+    );
+}
+
+static Value function_prototype_value(const JsFunction *function) {
+    if (function->prototype_slot == NULL) {
+        return value_null();
+    }
+    return value_object_take(function->prototype_slot);
+}
+
 static JsFunction *create_user_function(const Stmt *declaration, const Expr *expression, Env *closure) {
     JsFunction *function = jsrt_malloc(sizeof(*function));
     gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
@@ -1082,6 +1141,40 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                         gc_temp_root_pop(&temp_current_root);
                         value_free(temp_current);
                     }
+                    gc_temp_root_pop(&assigned_value_root);
+                    gc_temp_root_pop(&root_value_root);
+                    return result_ok(value_null());
+                }
+                value_free(index_result.value);
+                current_temp = function_prototype_value(current->as.function);
+                current = &current_temp;
+                continue;
+            }
+
+            if (current->type == VALUE_FUNCTION && current->as.function != NULL) {
+                if (index_result.value.type != VALUE_STRING ||
+                    strcmp(index_result.value.as.string, "prototype") != 0) {
+                    value_free(index_result.value);
+                    gc_temp_root_pop(&assigned_value_root);
+                    gc_temp_root_pop(&root_value_root);
+                    return function_property_error(evaluator, step->line, step->column);
+                }
+                if (is_last) {
+                    if (current->as.function->is_native || !current->as.function->is_constructor) {
+                        value_free(index_result.value);
+                        gc_temp_root_pop(&assigned_value_root);
+                        gc_temp_root_pop(&root_value_root);
+                        return native_function_prototype_assignment_error(evaluator, step->line, step->column);
+                    }
+                    if (assigned_value.type != VALUE_NULL &&
+                        (assigned_value.type != VALUE_OBJECT || assigned_value.as.object == NULL)) {
+                        value_free(index_result.value);
+                        gc_temp_root_pop(&assigned_value_root);
+                        gc_temp_root_pop(&root_value_root);
+                        return function_prototype_assignment_error(evaluator, step->line, step->column);
+                    }
+                    current->as.function->prototype_slot = assigned_value.type == VALUE_OBJECT ? assigned_value.as.object : NULL;
+                    value_free(index_result.value);
                     gc_temp_root_pop(&assigned_value_root);
                     gc_temp_root_pop(&root_value_root);
                     return result_ok(value_null());
