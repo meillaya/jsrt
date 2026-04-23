@@ -915,8 +915,6 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             case BC_ALLOC_INSTANCE: {
                 size_t argc = (size_t)instruction->operand;
                 size_t callee_index;
-                size_t receiver_index = 0U;
-                size_t args_base;
                 Value *callee;
                 JsObject *instance;
 
@@ -925,13 +923,7 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     goto cleanup;
                 }
 
-                callee_index = vm.stack_count - argc - (is_method_call ? 2U : 1U);
-                args_base = callee_index + 1U;
-                if (is_method_call) {
-                    receiver_index = callee_index + 1U;
-                    args_base = receiver_index + 1U;
-                    this_value = value_clone(vm.stack[receiver_index]);
-                }
+                callee_index = vm.stack_count - argc - 1U;
                 callee = &vm.stack[callee_index];
                 if (callee->type != VALUE_FUNCTION || callee->as.function == NULL || callee->as.function->is_native) {
                     result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "attempted to construct a non-constructor value");
@@ -1039,21 +1031,13 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 callee_index = vm.stack_count - argc - 2U;
                 callee = &vm.stack[callee_index];
                 if (callee->type != VALUE_FUNCTION || callee->as.function == NULL) {
-                    value_free(this_value);
                     result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "attempted to call a non-function value");
-                    goto cleanup;
-                }
-
-                if (is_constructor_call && (callee->as.function->is_native || !callee->as.function->is_constructor)) {
-                    value_free(this_value);
-                    result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "attempted to construct a non-constructor value");
                     goto cleanup;
                 }
 
                 if (callee->as.function->is_native) {
                     EvalResult native_result = vm_call_native(&vm, callee->as.function, &vm.stack[callee_index + 2U]);
                     size_t i;
-                    value_free(this_value);
                     for (i = callee_index; i < vm.stack_count; ++i) {
                         value_free(vm.stack[i]);
                     }
@@ -1068,12 +1052,10 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 }
 
                 if (callee->as.function->bytecode == NULL) {
-                    value_free(this_value);
                     result = vm_runtime_error(&vm, RUNTIME_ERROR_INTERNAL, "invalid compiled function");
                     goto cleanup;
                 }
                 if (argc != callee->as.function->bytecode->arity) {
-                    value_free(this_value);
                     result = vm_runtime_error_take(
                         &vm,
                         RUNTIME_ERROR_ARITY,
