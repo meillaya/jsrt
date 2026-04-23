@@ -115,6 +115,46 @@ static void assert_backend_parity(TestContext *ctx, const char *source) {
     eval_result_free(&vm);
 }
 
+static void assert_backend_error_contains(TestContext *ctx, const char *source, const char *expected_substring) {
+    char *error = NULL;
+    EvalResult tree = eval_treewalk_source(source, &error);
+    EvalResult vm = eval_vm_source(source, &error);
+
+    EXPECT_TRUE(ctx, tree.had_error);
+    EXPECT_TRUE(ctx, vm.had_error);
+    EXPECT_TRUE(ctx, tree.error_message != NULL);
+    EXPECT_TRUE(ctx, vm.error_message != NULL);
+    if (tree.error_message != NULL) {
+        EXPECT_TRUE(ctx, strstr(tree.error_message, expected_substring) != NULL);
+    }
+    if (vm.error_message != NULL) {
+        EXPECT_TRUE(ctx, strstr(vm.error_message, expected_substring) != NULL);
+    }
+    eval_result_free(&tree);
+    eval_result_free(&vm);
+}
+
+static void assert_backend_value_text(TestContext *ctx, const char *source, const char *expected_text) {
+    char *error = NULL;
+    EvalResult tree = eval_treewalk_source(source, &error);
+    EvalResult vm = eval_vm_source(source, &error);
+
+    EXPECT_FALSE(ctx, tree.had_error);
+    EXPECT_FALSE(ctx, vm.had_error);
+    if (!tree.had_error && !vm.had_error) {
+        char *tree_text = value_to_string(tree.value);
+        char *vm_text = value_to_string(vm.value);
+        EXPECT_STRING_EQ(ctx, tree_text, expected_text);
+        EXPECT_STRING_EQ(ctx, vm_text, expected_text);
+        free(tree_text);
+        free(vm_text);
+    }
+    value_free(tree.value);
+    value_free(vm.value);
+    eval_result_free(&tree);
+    eval_result_free(&vm);
+}
+
 void run_vm_tests(TestContext *ctx) {
     assert_backend_parity(ctx, "let x = 1 + 2 * 3; x;\n");
     assert_backend_parity(
