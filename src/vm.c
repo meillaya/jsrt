@@ -538,9 +538,6 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             case BC_LOAD_THIS:
                 vm_push(&vm, value_clone(frame->this_value));
                 break;
-            case BC_LOAD_THIS:
-                vm_push(&vm, value_clone(frame->this_value));
-                break;
             case BC_STORE_LOCAL: {
                 Value value = vm_pop(&vm);
                 size_t slot = frame->locals_base + (size_t)instruction->operand;

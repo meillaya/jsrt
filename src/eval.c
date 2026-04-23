@@ -1927,7 +1927,15 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
     }
 
     value_free(target.value);
-    return result;
+    value_free(index.value);
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        expr->line,
+        expr->column,
+        1,
+        "indexing requires an array or object value"
+    );
 }
 
 static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
@@ -1967,13 +1975,12 @@ static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
     value_free(target.value);
     return result_runtime_error_at_take(
         evaluator,
-        &target.value,
-        expr->as.property.name,
+        RUNTIME_ERROR_LOOKUP,
         expr->line,
-        expr->column
+        expr->column,
+        1,
+        jsrt_format("object key '%s' not found", expr->as.property.name)
     );
-    value_free(target.value);
-    return result;
 }
 
 static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
