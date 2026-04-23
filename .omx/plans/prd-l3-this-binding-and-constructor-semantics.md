@@ -16,9 +16,10 @@ Roadmap milestone L3: add `this` resolution, constructor calls, `new` semantics,
 2. Define `this` binding for method calls using the existing L2 receiver/prototype lookup model.
 3. Define constructor invocation semantics for `new` using the existing object/prototype system.
 4. Preserve ordinary function-call behavior as a separate path from method/constructor calls.
-5. Add diagnostics for invalid `new` targets and any bounded unsupported `prototype` interactions introduced by the chosen model.
-6. Keep evaluator and VM semantics aligned; both backends must pass equivalent positive/negative cases.
-7. Avoid new dependencies and reuse current AST / compiler / VM infrastructure patterns.
+5. Keep function-property semantics explicitly bounded: support only `prototype` / `["prototype"]`, reject all other function property access/assignment in L3.
+6. Add diagnostics for invalid `new` targets and any bounded unsupported `prototype` interactions introduced by the chosen model. These constructor/function-property failures use the runtime type-diagnostic family (`RUNTIME_ERROR_TYPE`) unless a later ADR explicitly changes that choice.
+7. Keep evaluator and VM semantics aligned; both backends must pass equivalent positive/negative cases.
+8. Avoid new dependencies and reuse current AST / compiler / VM infrastructure patterns.
 
 ## Explicit semantic decisions
 ### `this` binding
@@ -26,24 +27,49 @@ Roadmap milestone L3: add `this` resolution, constructor calls, `new` semantics,
 - Binding uses the original receiver, not the prototype owner where the function was found.
 - Extracted/bare calls (`let f = obj.method; f()`) bind `this` to `null`.
 - Calls that are not property/index calls remain ordinary function calls with `this = null`.
+- Bare/top-level `this` also evaluates to `null` in L3; it does not error.
 
 ### `new`
 - `new` is **syntax-only at the surface in L3**: introduce a keyword/operator, not a reflective builtin alternative.
-- Supported L3 surface: `new <postfix-callee>(args...)`, where the callee may be an identifier or member/index expression that resolves to a function.
+- Supported L3 surface is **parenthesized constructor calls only**: `new <callee>(args...)`. Bare `new Ctor` without parentheses stays unsupported in L3. The callee may be an identifier, property access, or index access that resolves to a function; call-expression callees for `new` are out of scope for this milestone unless the PRD is revised.
 - `new` evaluates the callee and arguments once, allocates a fresh object instance, sets its prototype from the constructor’s prototype slot, then invokes the constructor with `this` bound to that fresh instance.
 - Instance prototype rule: use `Ctor.prototype` when it is an object; otherwise fall back to `null`.
+
+### Unsupported `new` rejection matrix
+- `new Ctor` without parentheses: rejected at parse time in L3.
+- `new foo()(1)` / call-expression constructor callees: rejected at parse/front-end time as out of L3 surface.
+- malformed `new (...)`: parser/diagnostics ownership (`tests/test_parser.c` + `tests/test_diagnostics.c`).
+- valid syntax but non-constructable targets (`new 1`, `new builtin`): runtime type diagnostics in evaluator + VM (`tests/test_eval.c` + `tests/test_vm.c`).
+
+### Native-function construction policy
+- Native functions are not constructors in L3. `new` on a native function raises the same targeted runtime diagnostic family as any non-constructable function target.
+- Reading `builtin.prototype` or `builtin["prototype"]` yields `null`.
+- Writing `builtin.prototype = value` or `builtin["prototype"] = value` is rejected with the same runtime type diagnostic family as other unsupported constructor-prototype writes on native functions.
+- Native functions do not participate in arbitrary function property behavior.
 
 ### Constructor return behavior
 - If the constructor returns an object, array, or function value explicitly, that value becomes the result of `new`.
 - If the constructor returns `null`, number, bool, or string, the explicit return is ignored and the fresh instance is returned.
 - This keeps L3 predictable while staying compatible with future L4 class lowering, where constructors conceptually initialize an instance rather than replace it with primitives.
 
+### Frozen call / `new` lowering contract
+- **Tree-walk evaluator:** method/constructor execution uses an internal call descriptor `(callee, receiver_or_null, arguments, is_constructor)`.
+- **Tree-walk `this`:** `this` is provided through a dedicated function-local binding in the call environment, not by synthesizing a user-visible declaration in the outer scope.
+- **Tree-walk plain calls:** top-level/plain/extracted calls set `this = null`.
+- **Compiler/VM stack contract:**
+  - plain call lowers to stack shape `[callee, arg1, ..., argN] -> BC_CALL N`
+  - method call lowers to `[callee, receiver, arg1, ..., argN] -> BC_CALL_METHOD N`
+  - constructor call lowers to `[callee, instance, arg1, ..., argN] -> BC_CALL_NEW N`
+- **VM `this`:** method/constructor frames receive an explicit hidden receiver slot in frame state/local layout; plain-call frames carry `this = null`.
+- **Evaluation order is fixed:** receiver/base first, then property/index expression, then arguments left-to-right, exactly once each.
+
 ### Function `prototype` surface
 - L3 should add a **narrow function prototype slot**, not full “functions are generic objects” semantics.
-- Supported L3 function-property behavior is limited to the `prototype` property needed for constructor behavior.
-- Reading `Ctor.prototype` returns the constructor’s prototype object.
-- Assigning `Ctor.prototype = value` accepts an object or `null`; other values yield a runtime type diagnostic.
-- Arbitrary function property bags remain out of scope for L3 and stay deferred unless execution discovers that the narrower slot model is unworkable.
+- Supported L3 function-property behavior is limited to the `prototype` meta-property needed for constructor behavior.
+- Both `Ctor.prototype` and `Ctor["prototype"]` read the constructor’s prototype slot.
+- Assigning `Ctor.prototype = value` or `Ctor["prototype"] = value` accepts an object or `null`; other values yield a targeted runtime type diagnostic.
+- Any non-`prototype` function property read/write remains out of scope in L3 and fails with a **runtime type diagnostic** rather than silently broadening functions into generic objects. Specifically: `fn.x`, `fn["x"]`, `fn.x = 1`, and `fn["x"] = 1` all fail unless the property name is exactly `prototype`; non-string bracket keys on functions also fail with the same runtime type diagnostic family.
+- Arbitrary function property bags remain deferred unless the PRD/ADR is explicitly revised.
 
 ## 2) Acceptance Criteria
 1. Lexer/parser recognize `this` and `new` and build explicit AST forms for them.
@@ -52,10 +78,14 @@ Roadmap milestone L3: add `this` resolution, constructor calls, `new` semantics,
 4. `new Ctor(args)` allocates a fresh object, binds `this` to it, and applies constructor-side writes to that instance.
 5. `Ctor.prototype` controls the prototype assigned to instances created via `new` when the slot is an object; `null` yields no prototype.
 6. Returning an aggregate/function from a constructor replaces the default instance; returning a primitive or `null` does not.
-7. `new` against a non-function value fails with a targeted runtime diagnostic.
-8. Invalid constructor prototype assignment fails with a targeted runtime diagnostic.
-9. Evaluator and VM backends cover the same supported positive/negative cases.
-10. Docs update the semantics baseline to move `this` / `new` from deferred to supported, while keeping classes deferred to L4.
+7. `new` against a non-function value fails with `RUNTIME_ERROR_TYPE`.
+8. `new` against a native function also fails with `RUNTIME_ERROR_TYPE`, because native functions are not constructors in L3.
+9. Invalid constructor prototype assignment fails with `RUNTIME_ERROR_TYPE`.
+10. Any non-`prototype` function property access/assignment fails with `RUNTIME_ERROR_TYPE` on both backends, including non-string bracket keys on functions.
+11. Native function `prototype` behavior is explicit and parity-tested: reads yield `null`, writes fail, and `new` on a native function errors.
+12. Receiver-aware method/constructor evaluation guarantees single evaluation of receiver/base, property/index expression, and arguments in left-to-right order.
+13. Evaluator and VM backends cover the same supported positive/negative cases, including `obj["method"]()` parity with dot-call receiver binding.
+14. Docs update the semantics baseline to move `this` / `new` from deferred to supported, while keeping classes deferred to L4.
 
 ## 3) Implementation Steps
 1. **Syntax/AST planning slice**
@@ -65,10 +95,13 @@ Roadmap milestone L3: add `this` resolution, constructor calls, `new` semantics,
 2. **Call-shape refactor slice**
    - Introduce an internal call descriptor shared by evaluator and compiler/VM planning: callee value, optional receiver/`this`, argument list, and constructor mode.
    - Distinguish plain call vs property/index call vs constructor call at evaluation/compile time.
+   - Implement the frozen lowering contract: receiver/base first, then property/index expression, then arguments left-to-right, with explicit bytecode shapes for `BC_CALL`, `BC_CALL_METHOD`, and `BC_CALL_NEW`.
+   - Model `this` as a dedicated function-local/runtime slot in both evaluator and VM, not as an ad hoc user-visible variable synthesis.
 3. **Runtime object-model slice**
    - Extend `JsFunction` with a dedicated constructor prototype slot plus any GC marking/freeing support required.
-   - Initialize user functions with a default empty prototype object; native functions may either expose `null` prototype or opt out of construction explicitly.
-   - Add bounded function `prototype` read/write support needed by `new`.
+   - Initialize user functions with a default empty prototype object; native functions expose `null` for the constructor prototype slot and are never constructors in L3.
+   - Add bounded function `prototype` read/write support needed by `new`, including bracket-form access.
+   - Keep all non-`prototype` function property access/assignment explicitly rejected with one bounded diagnostic family.
 4. **Evaluator semantics slice**
    - Thread `this` into ordinary/method/constructor call execution.
    - Resolve property/index calls to `(callee, receiver)` without double-evaluating the receiver.
@@ -95,16 +128,21 @@ Roadmap milestone L3: add `this` resolution, constructor calls, `new` semantics,
 
 ## 5) Verification Steps
 1. Add lexer tests for `this` / `new` keyword tokenization.
-2. Add parser tests proving explicit `this` and `new` AST forms and relevant recovery diagnostics.
+2. Add parser tests proving explicit `this` and `new` AST forms plus unsupported-`new` rejection cases and relevant recovery diagnostics.
 3. Add evaluator tests for:
+   - bare/top-level `this` resolves to `null`
    - receiver-bound prototype methods
+   - `obj["method"]()` parity with dot-call receiver binding
    - extracted method loses receiver (`this = null`)
    - constructor field initialization
-   - constructor prototype wiring
+   - constructor prototype wiring via dot and bracket `prototype`
    - explicit aggregate-vs-primitive return behavior
-   - invalid `new` target
+   - invalid `new` target, including native functions
    - invalid `Ctor.prototype = <non-object-non-null>` assignment
-4. Mirror the same cases in VM tests.
+   - unsupported non-`prototype` function property access/assignment
+   - explicit evaluation-order guard proving receiver/callee/args run once
+   - parser/runtime rejection for unsupported bounded-`new` forms such as bare `new Ctor` and any out-of-scope callee shapes
+4. Mirror the same cases in VM tests where applicable; keep unsupported `new` surface rejections locked in parser/eval coverage even when they are syntax-front-end concerns.
 5. Run `make clean && make test`.
 6. Run the ASan lane from `docs/milestone-verification-checklist.md` because function/object graph reachability changes.
 7. Run at least one example program demonstrating constructor + prototype method behavior.
@@ -125,9 +163,9 @@ Roadmap milestone L3: add `this` resolution, constructor calls, `new` semantics,
 ### Viable options
 #### Option A — Narrow constructor slot on functions (**recommended**)
 - Add dedicated `this`/`new` syntax and runtime call metadata.
-- Add only a special `prototype` slot on functions for constructor semantics.
+- Add only a special `prototype` slot/meta-property on functions for constructor semantics.
 - Pros: smallest semantic expansion; preserves L4 separation; lower risk than making functions general objects.
-- Cons: introduces a special case for function property handling.
+- Cons: introduces a special case for function property handling and requires explicitly rejecting non-`prototype` function properties.
 
 #### Option B — Generalize functions to behave like objects now
 - Make function values participate in generic property access/assignment, with `prototype` just another property.
@@ -174,7 +212,9 @@ This option unlocks constructor-style object patterns with the least architectur
 - `src/parser.c` — parse `this`, `new`, and bounded precedence/recovery cases.
 - `include/jsrt/value.h` — add constructor prototype slot / metadata to `JsFunction`.
 - `src/eval.c` — add receiver-aware call evaluation, `this` lookup, constructor behavior, and function `prototype` handling.
-- `include/jsrt/bytecode.h` — add receiver/new bytecode shape if needed.
+- `src/value.c` — mark/release any new function-owned references and keep function/value invariants explicit.
+- `include/jsrt/bytecode.h` — add explicit `BC_CALL_METHOD` / `BC_CALL_NEW` (or equivalently named) receiver-aware opcode shapes.
+- `src/bytecode.c` — update opcode naming/disassembly for the chosen receiver/new opcodes and stack contract.
 - `src/compiler.c` — compile method/new calls distinctly from plain calls.
 - `src/vm.c` — execute receiver-aware calls/new and mirror diagnostics.
 - `src/gc.c` — mark/sweep any new function-owned references.
@@ -184,8 +224,11 @@ This option unlocks constructor-style object patterns with the least architectur
 - `tests/test_parser.c`
 - `tests/test_eval.c`
 - `tests/test_vm.c`
+- `tests/test_bytecode.c`
+- `tests/test_diagnostics.c`
 - `docs/semantics-baseline.md`
 - `docs/milestone-verification-checklist.md`
+- `docs/project-status-and-architecture.md`
 - optionally `examples/` for one constructor/prototype demo fixture
 
 ## 9) Available-agent-types roster + staffing guidance
