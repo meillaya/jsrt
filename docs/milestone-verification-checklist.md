@@ -360,3 +360,51 @@ This closure record applies to the repo’s coarse end-to-end CLI timing workflo
 - Preserve the manifest contract and frozen CSV header unless intentionally versioning the benchmark workflow.
 - Treat deeper profiling/instrumentation as later work rather than retroactively widening L1.
 - Keep timing assertions out of `make test` unless a future milestone explicitly changes that process contract.
+
+## M1 closure record — 2026-04-23
+
+This section formally closes the bounded **M1 — GC observability and stress rig** milestone against its approved PRD/test-spec and the retained repo evidence below.
+
+This closure record applies to the repo’s bounded GC observability surface: counters, trace hooks, temp-root tracking, and a repeatable stress fixture. It does **not** claim a collector-policy rewrite, allocation-triggered collection, or broader GC semantics changes.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `make clean && make debug` → debug-capable build completed successfully
+- `JSRT_GC_TRACE=1 ./build/jsrt examples/gc_stress.js` → trace output emitted plus final program value `85`
+- `tail -n 8 build/gc-trace.log` → retained trace lines including `reason=process-cleanup` and live/swept/temp-root counters
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-m1-gc-observability.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-m1-gc-observability.md`
+  - `docs/gc-observability-and-stress.md`
+
+### Changed files in the M1 milestone implementation
+
+The original M1 implementation diff is not isolated as one clean historical commit in the current repository history. The current authoritative implementation surface for the landed M1 milestone is:
+
+- `.omx/plans/prd-javascript-runtime-roadmap-m1-gc-observability.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m1-gc-observability.md`
+- `docs/gc-observability-and-stress.md`
+- `docs/project-status-and-architecture.md`
+- `include/jsrt/gc.h`
+- `src/gc.c`
+- `examples/gc_stress.js`
+- `tests/test_eval.c`
+
+### Simplifications made
+
+- Added observability around the existing bounded collector rather than changing collection policy.
+- Kept the stress rig grounded in currently supported semantics instead of inventing a synthetic benchmark-only GC workload.
+- Used an opt-in trace flag (`JSRT_GC_TRACE`) rather than making GC telemetry part of normal execution output.
+
+### Remaining risks
+
+- M1 observability is intentionally bounded and should not be misread as a full GC debugging/profiling framework.
+- Trace output is useful for manual inspection but is not a stable external API contract beyond the documented debugging workflow.
+- Later GC/runtime work must preserve the distinction between observability and collector-policy changes unless a later milestone intentionally revises it.
+
+### Milestone-specific follow-ups
+
+- Keep GC trace mode opt-in unless a future milestone intentionally changes that UX contract.
+- Treat deeper collector-policy or allocation-trigger work as later milestones rather than retroactively widening M1.
+- Preserve the stress fixture as a semantics-grounded regression tool, not just a debugging demo.
