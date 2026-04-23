@@ -264,6 +264,94 @@ void run_vm_tests(TestContext *ctx) {
         "} while (i < 4);\n"
         "total;\n"
     );
+    assert_backend_parity(
+        ctx,
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.name;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let grand = {name: \"root\"};\n"
+        "let proto = {};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(proto, grand);\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.name;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.name = \"child\";\n"
+        "proto.name + \":\" + obj.name;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {nested: {value: 0}};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.nested.value = 1;\n"
+        "len(obj) + \":\" + proto.nested.value + \":\" + obj.nested.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {speak: function () { return 7; }};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.speak();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {hidden: 1};\n"
+        "let obj = {shown: 2};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "len(obj);\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let protoA = {kind: \"a\"};\n"
+        "let protoB = {kind: \"b\"};\n"
+        "let left = {name: \"same\"};\n"
+        "let right = {name: \"same\"};\n"
+        "setPrototypeOf(left, protoA);\n"
+        "setPrototypeOf(right, protoB);\n"
+        "left == right;\n"
+    );
+    assert_backend_value_text(
+        ctx,
+        "let proto = {hidden: 1};\n"
+        "let obj = {shown: 2};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj;\n",
+        "{shown: 2}"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "let proto = {name: \"base\"};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.missing;\n",
+        "object key 'missing' not found"
+    );
+    assert_backend_error_contains(ctx, "setPrototypeOf(1, {});\n", "setPrototypeOf() expects an object receiver");
+    assert_backend_error_contains(ctx, "setPrototypeOf({}, 1);\n", "setPrototypeOf() expects an object or null prototype");
+    assert_backend_error_contains(
+        ctx,
+        "let obj = {};\n"
+        "setPrototypeOf(obj, obj);\n",
+        "setPrototypeOf() cannot set an object as its own prototype"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "let a = {};\n"
+        "let b = {};\n"
+        "setPrototypeOf(a, b);\n"
+        "setPrototypeOf(b, a);\n",
+        "setPrototypeOf() cannot create a prototype cycle"
+    );
 
     {
         char *error = NULL;
