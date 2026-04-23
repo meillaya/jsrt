@@ -4,6 +4,8 @@ This document is the **current-state overview** for `jsrt` as of **2026-04-23**.
 
 Older milestone docs such as `docs/vm-parity-backend.md` capture the scope of a specific milestone at the time it was written. This file is the best place to understand what the repository implements **today**.
 
+For the canonical milestone-by-milestone status synthesis, see `docs/repo-milestone-status.md`. This file focuses on the current implementation and architectural shape, not the authoritative per-milestone ledger.
+
 ## 1. Project thesis
 
 `jsrt` is a small JavaScript-like runtime written in C. The project is explicitly learning-first: the code favors clarity, explicit ownership, and milestone-by-milestone evolution over full ECMAScript compatibility.
@@ -375,28 +377,13 @@ Useful end-to-end checks:
 JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js
 ```
 
-## 11. Next major milestones
+## 11. Milestone status and remaining frontier
 
-The immediate next major milestones are no longer basic language features. The codebase has reached the point where the next valuable work is about scale, architecture, and measurement.
+For the authoritative milestone-by-milestone status view, see `docs/repo-milestone-status.md`.
 
-### Near-next execution targets
-
-1. **L1 — Benchmark and profiling harness**
-   - Add a repeatable performance corpus and measurement harness.
-   - Establish baseline numbers before optimization or architecture expansion.
-
-2. **L2 — Prototype chain and method dispatch**
-   - Introduce inheritance-style object lookup semantics.
-   - This is the first major step from “object literals” toward a richer JavaScript object model.
-
-3. **L3 — `this` binding and constructor semantics**
-   - Define method invocation context and object construction rules.
-   - Landed in the current repo as a bounded surface: receiver-aware method calls, parenthesized `new`, and the narrow function `prototype` meta-property.
-
-### Larger long-horizon targets
+At a high level, the repo has already landed bounded forms of the earlier benchmark, object-model, constructor, class, GC, built-in, compiler, and VM milestones. The next major frontier is no longer basic language-surface work; it is the remaining long-horizon platform and experimentation work:
 
 ```text
-L4  bounded class syntax and desugaring/direct support (landed: declarations + constructor + instance methods)
 L5  module system (import/export)
 L6  embeddable host API
 L7  async/event-loop experiment
@@ -404,6 +391,8 @@ L8  regex + richer standard library
 L9  conformance subset harness
 L10 optional JIT / advanced optimization feasibility study
 ```
+
+That remaining set should be read alongside the current gaps in section 9 and the detailed status ledger, rather than as a replacement for them.
 
 ## 12. Practical reading of the docs tree
 
