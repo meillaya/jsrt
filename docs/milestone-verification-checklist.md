@@ -59,24 +59,24 @@ Use this addendum when verifying the bounded L3 milestone.
 
 Use this addendum when verifying the bounded L4 milestone.
 
-- [ ] `class Name { ... }` declarations are verified across parser, evaluator, compiler, and VM
-- [ ] supported class behavior is locked: optional constructor, identifier-named instance methods, default constructor behavior, prototype-installed methods, and extracted-method `this = null`
-- [ ] `Name()` without `new` is rejected on both backends with stable runtime type diagnostics
-- [ ] `Name.prototype` / `Name["prototype"]` remain readable and writable under the existing object-or-null rules
-- [ ] unsupported syntax (`extends`, `super`, static members, fields, getters/setters, computed names, class expressions) stays parser-owned with stable diagnostics
-- [ ] bytecode/disassembly proof still routes lowered classes through `BC_CALL`, `BC_CALL_METHOD`, and `BC_CALL_NEW` with no new class-specific invocation opcode
-- [ ] docs/examples describe the bounded L4 class surface while keeping inheritance and the broader ES class feature set deferred
+- [x] `class Name { ... }` declarations are verified across parser, evaluator, compiler, and VM
+- [x] supported class behavior is locked: optional constructor, identifier-named instance methods, default constructor behavior, prototype-installed methods, and extracted-method `this = null`
+- [x] `Name()` without `new` is rejected on both backends with stable runtime type diagnostics
+- [x] `Name.prototype` / `Name["prototype"]` remain readable and writable under the existing object-or-null rules
+- [x] unsupported syntax (`extends`, `super`, static members, fields, getters/setters, computed names, class expressions) stays parser-owned with stable diagnostics
+- [x] bytecode/disassembly proof still routes lowered classes through `BC_CALL`, `BC_CALL_METHOD`, and `BC_CALL_NEW` with no new class-specific invocation opcode
+- [x] docs/examples describe the bounded L4 class surface while keeping inheritance and the broader ES class feature set deferred
 
 ## L4 class syntax / desugaring exit gates
 
 Use this addendum when verifying the bounded L4 milestone.
 
-- [ ] bounded `class Name { ... }` declarations are covered on both evaluator and VM backends
-- [ ] class bindings are construct-only, while plain calls fail with stable type diagnostics
-- [ ] omitted constructors, prototype-installed methods, extracted-method `this = null`, and `Name.prototype` read/write parity are all explicitly verified
-- [ ] unsupported `extends`, `super`, static members, fields, accessors, computed names, and class expressions remain parser-owned rejections with source diagnostics
-- [ ] docs/examples describe the bounded class surface and the deliberate no-TDZ sequential declaration model
-- [ ] bytecode/disassembly evidence shows class lowering still routes through `BC_CALL`, `BC_CALL_METHOD`, and `BC_CALL_NEW`
+- [x] bounded `class Name { ... }` declarations are covered on both evaluator and VM backends
+- [x] class bindings are construct-only, while plain calls fail with stable type diagnostics
+- [x] omitted constructors, prototype-installed methods, extracted-method `this = null`, and `Name.prototype` read/write parity are all explicitly verified
+- [x] unsupported `extends`, `super`, static members, fields, accessors, computed names, and class expressions remain parser-owned rejections with source diagnostics
+- [x] docs/examples describe the bounded class surface and the deliberate no-TDZ sequential declaration model
+- [x] bytecode/disassembly evidence shows class lowering still routes through `BC_CALL`, `BC_CALL_METHOD`, and `BC_CALL_NEW`
 
 ## Design-heavy milestones
 
@@ -90,3 +90,64 @@ Use this addendum when verifying the bounded L4 milestone.
 - [ ] simplifications made listed
 - [ ] remaining risks listed
 - [ ] milestone-specific follow-ups recorded explicitly
+
+## L4 closure record — 2026-04-23
+
+This section formally closes the bounded L4 milestone against the checklist above.
+
+Generic prerequisite/evidence/completion gates were satisfied for L4 via the approved PRD + test spec, the implementation/planning commits, the retained evidence below, and the high-risk design review artifacts (`architect` + `critic`) referenced from the L4 planning docs.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1035 assertions`
+- `./build/jsrt examples/class_syntax.js` → `7:true`
+- `JSRT_BACKEND=vm ./build/jsrt examples/class_syntax.js` → `7:true`
+- Bytecode/disassembly evidence is locked in `tests/test_bytecode.c`, including proof that lowered class execution still uses `CALL`, `CALL_METHOD`, and `CALL_NEW`, with no class-specific invocation opcode.
+- Parser/diagnostic rejection coverage is locked in `tests/test_parser.c`, `tests/test_diagnostics.c`, and `tests/test_vm.c`.
+
+### Changed files in the L4 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-l4-class-syntax-and-desugaring.md`
+- `.omx/plans/ralplan-javascript-runtime-l4-class-syntax-and-desugaring-draft.md`
+- `.omx/plans/test-spec-javascript-runtime-l4-class-syntax-and-desugaring.md`
+- `README.md`
+- `docs/milestone-verification-checklist.md`
+- `docs/project-status-and-architecture.md`
+- `docs/semantics-baseline.md`
+- `examples/class_syntax.js`
+- `include/jsrt/ast.h`
+- `include/jsrt/bytecode.h`
+- `include/jsrt/token.h`
+- `include/jsrt/value.h`
+- `src/ast.c`
+- `src/compiler.c`
+- `src/eval.c`
+- `src/lexer.c`
+- `src/parser.c`
+- `src/vm.c`
+- `tests/test_bytecode.c`
+- `tests/test_diagnostics.c`
+- `tests/test_eval.c`
+- `tests/test_lexer.c`
+- `tests/test_parser.c`
+- `tests/test_vm.c`
+
+### Simplifications made
+
+- Kept first-slice L4 bounded to `class Name { ... }` declarations with an optional constructor and identifier-named instance methods.
+- Reused the landed L3 constructor/prototype runtime instead of introducing a parallel class object model.
+- Preserved the existing `BC_CALL` / `BC_CALL_METHOD` / `BC_CALL_NEW` family instead of inventing class-specific dispatch opcodes.
+- Kept unsupported class surface parser-owned so out-of-scope features fail early and explicitly.
+
+### Remaining risks
+
+- `extends`, `super`, static members, fields, accessors, computed names, and class expressions remain intentionally deferred and must not be inferred as partially supported.
+- Future inheritance work will likely require explicit superclass/home-object metadata rather than a trivial extension of this first-slice lowering.
+- The bounded no-TDZ sequential declaration model is deliberate for this slice and should not be widened silently.
+
+### Milestone-specific follow-ups
+
+- Treat `extends` / `super` as later work requiring explicit superclass/home-object metadata and possibly wider function heritage affordances.
+- Reassess after L4 whether a later L4.x follow-up should own inheritance/static surface separately.
+- Do not widen the class surface without revisiting the approved L4 PRD and test spec.
