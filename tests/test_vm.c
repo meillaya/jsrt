@@ -373,6 +373,77 @@ void run_vm_tests(TestContext *ctx) {
         "obj;\n",
         "{shown: 2}"
     );
+    assert_backend_parity(ctx, "this;\n");
+    assert_backend_parity(ctx, "function readThis() { return this; }\nreadThis();\n");
+    assert_backend_parity(
+        ctx,
+        "let obj = {value: 4, get: function () { if (this == null) { return 1; } return this.value; }};\n"
+        "let f = obj.get;\n"
+        "f();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let obj = {value: 4, get: function () { return this.value; }};\n"
+        "obj.get() + obj[\"get\"]();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let proto = {get: function () { return this.value; }};\n"
+        "let obj = {value: 7};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.get() + obj[\"get\"]();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Box(v) { this.value = v; }\n"
+        "let proto = {get: function () { return this.value; }};\n"
+        "Box.prototype = proto;\n"
+        "let box = new Box(9);\n"
+        "box.get();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Box(v) { this.value = v; }\n"
+        "let proto = {get: function () { return this.value; }};\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(6);\n"
+        "Box[\"prototype\"] == proto && box[\"get\"]() == 6;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Replace() { return {value: 8}; }\n"
+        "let out = new Replace();\n"
+        "out.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Keep() { this.value = 3; return 0; }\n"
+        "let out = new Keep();\n"
+        "out.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function KeepNull() { this.value = 5; return null; }\n"
+        "let out = new KeepNull();\n"
+        "out.value;\n"
+    );
+    assert_backend_parity(ctx, "print.prototype;\n");
+    assert_backend_parity(
+        ctx,
+        "let log = \"\";\n"
+        "function note(label, value) { log = log + label; return value; }\n"
+        "let holder = {value: 5, get: function (x) { return log + \":\" + this.value + \":\" + x; }};\n"
+        "note(\"A\", holder)[note(\"B\", \"get\")](note(\"C\", 7));\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let log = \"\";\n"
+        "function note(label, value) { log = log + label; return value; }\n"
+        "function Box(v) { this.value = v; }\n"
+        "let holder = {Box: Box};\n"
+        "let out = new holder[note(\"B\", \"Box\")](note(\"C\", 4));\n"
+        "log + \":\" + out.value;\n"
+    );
     assert_backend_error_contains(
         ctx,
         "let proto = {name: \"base\"};\n"
@@ -397,6 +468,58 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(b, a);\n",
         "setPrototypeOf() cannot create a prototype cycle"
     );
+    assert_backend_error_contains(ctx, "new print();\n", "native functions are not constructors");
+    assert_backend_error_contains(
+        ctx,
+        "let NotCtor = 1;\n"
+        "new NotCtor();\n",
+        "attempted to construct a non-function value"
+    );
+    assert_backend_error_contains(ctx, "function Box() {}\nBox.prototype = 1;\n", "function prototype must be an object or null");
+    assert_backend_error_contains(ctx, "print.prototype = {};\n", "native function prototypes are read-only in L3");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox.x;\n", "only function.prototype is supported in L3");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"];\n", "only function.prototype is supported in L3");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox[0];\n", "only function.prototype is supported in L3");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox.x = 1;\n", "only function.prototype is supported in L3");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"] = 1;\n", "only function.prototype is supported in L3");
+
+    {
+        char *error = NULL;
+        EvalResult tree = eval_treewalk_source("new Ctor;\n", &error);
+        EvalResult vm_result = eval_vm_source("new Ctor;\n", &error);
+
+        EXPECT_TRUE(ctx, tree.had_error);
+        EXPECT_TRUE(ctx, vm_result.had_error);
+        EXPECT_TRUE(ctx, strstr(tree.error_message, "expected '(' after constructor in 'new' expression") != NULL);
+        EXPECT_TRUE(ctx, strstr(vm_result.error_message, "expected '(' after constructor in 'new' expression") != NULL);
+        eval_result_free(&tree);
+        eval_result_free(&vm_result);
+    }
+
+    {
+        char *error = NULL;
+        EvalResult tree = eval_treewalk_source("new this();\n", &error);
+        EvalResult vm_result = eval_vm_source("new this();\n", &error);
+
+        EXPECT_TRUE(ctx, tree.had_error);
+        EXPECT_TRUE(ctx, vm_result.had_error);
+        EXPECT_TRUE(ctx, strstr(tree.error_message, "expected constructor target after 'new'") != NULL);
+        EXPECT_TRUE(ctx, strstr(vm_result.error_message, "expected constructor target after 'new'") != NULL);
+        eval_result_free(&tree);
+        eval_result_free(&vm_result);
+    }
+
+    {
+        char *error = NULL;
+        EvalResult tree = eval_treewalk_source("let NotCtor = 1;\nnew NotCtor();\n", &error);
+        EvalResult vm_result = eval_vm_source("let NotCtor = 1;\nnew NotCtor();\n", &error);
+
+        EXPECT_TRUE(ctx, tree.had_error);
+        EXPECT_TRUE(ctx, vm_result.had_error);
+        EXPECT_STRING_EQ(ctx, tree.error_message, vm_result.error_message);
+        eval_result_free(&tree);
+        eval_result_free(&vm_result);
+    }
 
     {
         char *error = NULL;

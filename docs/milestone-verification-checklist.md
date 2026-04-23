@@ -43,6 +43,18 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 - [ ] `docs/semantics-baseline.md` is updated to describe the bounded L2 surface, while keeping `this` / `new` / constructors / classes deferred to L3
 - [ ] the ASan lane is re-run after the final object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
+## L3 `this` / constructor / `new` exit gates
+
+Use this addendum when verifying the bounded L3 milestone.
+
+- [ ] bare/top-level `this` and plain/extracted calls are explicitly verified as `null`
+- [ ] `obj.method()` and `obj["method"]()` bind `this` to the concrete receiver, including prototype-inherited methods
+- [ ] `new Ctor(args)` is verified only in the approved parenthesized L3 form; bare `new Ctor` and broader postfix/call chaining stay rejected
+- [ ] user functions expose only the narrow `prototype` meta-property; non-`prototype` function property reads/writes remain rejected with type diagnostics
+- [ ] native-function constructor policy is locked: `builtin.prototype` reads as `null`, writes fail, and `new builtin()` fails
+- [ ] bytecode/disassembly evidence covers `BC_CALL`, `BC_CALL_METHOD`, and `BC_CALL_NEW`
+- [ ] docs/examples show constructor + prototype-method interaction while keeping classes deferred to L4
+
 ## Design-heavy milestones
 
 - [ ] architect review completed

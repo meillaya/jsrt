@@ -72,6 +72,8 @@ typedef enum {
     EXPR_LOGICAL,
     EXPR_ASSIGN,
     EXPR_CALL,
+    EXPR_THIS,
+    EXPR_NEW,
     EXPR_FUNCTION,
     EXPR_ARRAY,
     EXPR_OBJECT,
@@ -110,6 +112,10 @@ struct Expr {
             Expr *callee;
             ExprArray arguments;
         } call;
+        struct {
+            Expr *callee;
+            ExprArray arguments;
+        } new_expr;
         struct {
             char *name;
             StringArray params;
@@ -227,6 +233,8 @@ Expr *ast_new_binary(Expr *left, TokenType op, Expr *right, int line, int column
 Expr *ast_new_logical(Expr *left, TokenType op, Expr *right, int line, int column);
 Expr *ast_new_assign(Expr *target, Expr *value, int line, int column);
 Expr *ast_new_call(Expr *callee, ExprArray arguments, int line, int column);
+Expr *ast_new_this(int line, int column);
+Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column);
 Expr *ast_new_function_expr(const char *name, StringArray params, StmtArray body, int line, int column);
 Expr *ast_new_array_literal(ExprArray elements, int line, int column);
 Expr *ast_new_object_literal(ObjectPropertyArray properties, int line, int column);

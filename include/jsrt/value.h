@@ -13,20 +13,8 @@ typedef struct Env Env;
 typedef struct JsArray JsArray;
 typedef struct JsObjectEntry JsObjectEntry;
 typedef struct JsObject JsObject;
+typedef struct JsFunction JsFunction;
 typedef struct Value Value;
-
-typedef struct JsFunction {
-    GcHeader gc;
-    bool is_native;
-    const struct Stmt *declaration;
-    const struct Expr *expression;
-    Env *closure;
-    const char *native_name;
-    size_t native_arity;
-    const struct BytecodeFunction *bytecode;
-    Value *captures;
-    size_t capture_count;
-} JsFunction;
 
 typedef enum {
     VALUE_NUMBER,
@@ -49,6 +37,20 @@ typedef struct Value {
         JsObject *object;
     } as;
 } Value;
+
+struct JsFunction {
+    GcHeader gc;
+    bool is_native;
+    const struct Stmt *declaration;
+    const struct Expr *expression;
+    Env *closure;
+    const char *native_name;
+    size_t native_arity;
+    const struct BytecodeFunction *bytecode;
+    Value prototype;
+    Value *captures;
+    size_t capture_count;
+};
 
 struct JsArray {
     GcHeader gc;

@@ -10,6 +10,7 @@ A small JavaScript-like runtime in C with a hand-written lexer, recursive-descen
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - functions, closures, and function expressions
 - arrays and objects with shared-reference mutation semantics plus explicit prototype linkage / prototype-chain lookup
+- bounded `this` binding and parenthesized `new` constructor semantics
 - built-ins: `print`, `len`, `typeOf`
 - source-based diagnostics with caret markers
 - an opt-in VM backend via `JSRT_BACKEND=vm`
@@ -27,6 +28,7 @@ Tree-walk backend:
 ```sh
 ./build/jsrt examples/arithmetic.js
 ./build/jsrt examples/references.js
+./build/jsrt examples/this_new.js
 ```
 
 VM backend:

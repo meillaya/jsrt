@@ -40,6 +40,8 @@ static const char *bytecode_op_name(BytecodeOp op) {
         case BC_GET_INDEX: return "GET_INDEX";
         case BC_SET_INDEX: return "SET_INDEX";
         case BC_CALL: return "CALL";
+        case BC_CALL_METHOD: return "CALL_METHOD";
+        case BC_CALL_NEW: return "CALL_NEW";
         case BC_MAKE_FUNCTION: return "MAKE_FUNCTION";
         case BC_RETURN: return "RETURN";
     }
@@ -121,6 +123,8 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
         case BC_LOAD_UPVALUE:
         case BC_STORE_UPVALUE:
         case BC_CALL:
+        case BC_CALL_METHOD:
+        case BC_CALL_NEW:
         case BC_JUMP:
         case BC_JUMP_IF_FALSE:
         case BC_LOOP:

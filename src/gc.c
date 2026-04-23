@@ -136,11 +136,15 @@ static void gc_sweep_env(Env *env) {
         entry = next;
     }
 
+    if (env->has_this) {
+        value_release_reference(env->this_value);
+    }
     free(env);
 }
 
 static void gc_sweep_function(JsFunction *function) {
     size_t i;
+    value_release_reference(function->prototype);
     for (i = 0; i < function->capture_count; ++i) {
         value_release_reference(function->captures[i]);
     }

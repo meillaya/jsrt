@@ -1037,6 +1037,210 @@ void run_eval_tests(TestContext *ctx) {
         token_array_free(&tokens);
     }
 
+    result = evaluate_source("this;\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("function readThis() { return this; }\nreadThis();\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let obj = {value: 4, get: function () { if (this == null) { return 1; } return this.value; }};\n"
+        "let f = obj.get;\n"
+        "f();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let obj = {value: 4, get: function () { return this.value; }};\n"
+        "obj.get() + obj[\"get\"]();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 8.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let proto = {get: function () { return this.value; }};\n"
+        "let obj = {value: 7};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.get() + obj[\"get\"]();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 14.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box(v) { this.value = v; }\n"
+        "let proto = {get: function () { return this.value; }};\n"
+        "Box.prototype = proto;\n"
+        "let box = new Box(9);\n"
+        "box.get();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 9.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Box(v) { this.value = v; }\n"
+        "let proto = {get: function () { return this.value; }};\n"
+        "Box[\"prototype\"] = proto;\n"
+        "let box = new Box(6);\n"
+        "Box[\"prototype\"] == proto && box[\"get\"]() == 6;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Replace() { return {value: 8}; }\n"
+        "new Replace().value;\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "postfix chaining after 'new' is unsupported in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Replace() { return {value: 8}; }\n"
+        "let out = new Replace();\n"
+        "out.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 8.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function Keep() { this.value = 3; return 0; }\n"
+        "let out = new Keep();\n"
+        "out.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 3.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "function KeepNull() { this.value = 5; return null; }\n"
+        "let out = new KeepNull();\n"
+        "out.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 5.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let NotCtor = 1;\n"
+        "new NotCtor();\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "attempted to construct a non-function value") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("new print();\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "native functions are not constructors") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("print.prototype;\n", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("function Box() {}\nBox.prototype = 1;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "function prototype must be an object or null") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("print.prototype = {};\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "native function prototypes are read-only in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("function Box() {}\nBox.x;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("function Box() {}\nBox[\"x\"];\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("function Box() {}\nBox[0];\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("function Box() {}\nBox.x = 1;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source("function Box() {}\nBox[\"x\"] = 1;\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let log = \"\";\n"
+        "function note(label, value) { log = log + label; return value; }\n"
+        "let holder = {value: 5, get: function (x) { return log + \":\" + this.value + \":\" + x; }};\n"
+        "note(\"A\", holder)[note(\"B\", \"get\")](note(\"C\", 7));\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "ABC:5:7");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let log = \"\";\n"
+        "function note(label, value) { log = log + label; return value; }\n"
+        "function Box(v) { this.value = v; }\n"
+        "let holder = {Box: Box};\n"
+        "let out = new holder[note(\"B\", \"Box\")](note(\"C\", 4));\n"
+        "log + \":\" + out.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "BC:4");
+    value_free(result.value);
+    eval_result_free(&result);
+
     assert_example_output(ctx, "examples/arithmetic.js", "7\n");
     assert_example_output(ctx, "examples/branching.js", "20\n");
     assert_example_output(ctx, "examples/functions.js", "7\n");
@@ -1052,4 +1256,5 @@ void run_eval_tests(TestContext *ctx) {
     assert_example_output(ctx, "examples/references.js", "5:9:7\n");
     assert_example_output(ctx, "examples/builtins.js", "object:5:3\n");
     assert_example_output(ctx, "examples/gc_stress.js", "85\n");
+    assert_example_output(ctx, "examples/this_new.js", "11:11\n");
 }

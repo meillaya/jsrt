@@ -96,8 +96,8 @@ void run_bytecode_tests(TestContext *ctx) {
             "0023 NULL\n"
             "0024 RETURN\n"
             "\n"
-            "function twice arity=1 locals=1\n"
-            "0000 LOAD_LOCAL     0\n"
+            "function twice arity=1 locals=2\n"
+            "0000 LOAD_LOCAL     1\n"
             "0001 CONST          0 (2)\n"
             "0002 MUL\n"
             "0003 RETURN\n"
@@ -158,6 +158,25 @@ void run_bytecode_tests(TestContext *ctx) {
         EXPECT_TRUE(ctx, error == NULL);
         disassembly = bytecode_disassemble_program(&program);
         EXPECT_TRUE(ctx, strstr(disassembly, "MAKE_FUNCTION") != NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
+    }
+
+    {
+        const char *source =
+            "function Box(v) { this.value = v; }\n"
+            "let obj = {value: 1, get: function () { return this.value; }};\n"
+            "obj.get();\n"
+            "new Box(3);\n";
+        BytecodeProgram program;
+        char *error = NULL;
+        char *disassembly;
+
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
         free(disassembly);
         bytecode_program_free(&program);
     }

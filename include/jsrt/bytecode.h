@@ -39,6 +39,8 @@ typedef enum {
     BC_GET_INDEX,
     BC_SET_INDEX,
     BC_CALL,
+    BC_CALL_METHOD,
+    BC_CALL_NEW,
     BC_MAKE_FUNCTION,
     BC_RETURN
 } BytecodeOp;
@@ -46,6 +48,9 @@ typedef enum {
 typedef struct BytecodeInstruction {
     BytecodeOp op;
     int operand;
+    int line;
+    int column;
+    int width;
 } BytecodeInstruction;
 
 typedef struct {

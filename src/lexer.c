@@ -104,6 +104,8 @@ const char *token_type_name(TokenType type) {
         case TOKEN_TRUE: return "true";
         case TOKEN_FALSE: return "false";
         case TOKEN_NULL: return "null";
+        case TOKEN_THIS: return "this";
+        case TOKEN_NEW: return "new";
         default: return "unknown";
     }
 }
@@ -159,6 +161,12 @@ static TokenType identifier_type(const char *lexeme) {
     }
     if (strcmp(lexeme, "null") == 0) {
         return TOKEN_NULL;
+    }
+    if (strcmp(lexeme, "this") == 0) {
+        return TOKEN_THIS;
+    }
+    if (strcmp(lexeme, "new") == 0) {
+        return TOKEN_NEW;
     }
     return TOKEN_IDENTIFIER;
 }

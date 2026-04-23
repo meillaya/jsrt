@@ -90,13 +90,13 @@ Supported token families include:
 ```text
 literals: number, string, true, false, null
 keywords: let, const, function, return, if, else, do, for, while,
-          switch, case, default, break, continue
+          switch, case, default, break, continue, this, new
 operators: + - * / ! == != < <= > >= && || = . [ ] { } ( ) : ; ,
 ```
 
 ### 4.2 Parser
 
-The parser is a hand-written recursive-descent parser. It constructs an explicit AST with dedicated node kinds for literals, variables, unary/binary/logical expressions, calls, function expressions, arrays, objects, indexing, property access, declarations, blocks, loops, `switch`, and control-flow statements.
+The parser is a hand-written recursive-descent parser. It constructs an explicit AST with dedicated node kinds for literals, variables, unary/binary/logical expressions, calls, `this`, bounded `new`, function expressions, arrays, objects, indexing, property access, declarations, blocks, loops, `switch`, and control-flow statements.
 
 Relevant files:
 - `src/parser.c`
@@ -222,7 +222,7 @@ AST
   -> runtime Value result
 ```
 
-The compiler supports lexical locals, globals, control-flow patching, aggregate construction/access/mutation, function declarations, function expressions, and closure capture through upvalues. The VM executes the compiled subset using stack frames and captured values on compiled functions.
+The compiler supports lexical locals, globals, control-flow patching, aggregate construction/access/mutation, function declarations, function expressions, closure capture through upvalues, hidden `this` slots, and the bounded L3 call-family lowering (`BC_CALL`, `BC_CALL_METHOD`, `BC_CALL_NEW`). The VM executes the compiled subset using stack frames and captured values on compiled functions.
 
 The default backend is still the tree-walk evaluator. The VM is opt-in and intentionally treated as the secondary backend until broader parity work justifies any promotion.
 
@@ -238,6 +238,7 @@ Achieved so far:
 - explicit AST with clear ownership rules
 - variables, assignment, functions, closures, and function expressions
 - strings, arrays, objects, and shared-reference aggregate semantics
+- bounded `this` binding, constructor calls, and parenthesized `new`
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - `const` declarations
 - built-ins `print`, `len`, and `typeOf`
@@ -295,7 +296,8 @@ The project is intentionally incomplete. That is a feature, not a flaw, because 
 
 Still outside scope today:
 - modules and multi-file execution
-- classes, prototypes, `this`, and `new`
+- classes and `super`
+- general function-object property bags beyond the narrow constructor `prototype` slot
 - async/event loop semantics
 - broad ECMAScript coercion and compatibility
 - JIT or optimization passes
@@ -388,7 +390,7 @@ The immediate next major milestones are no longer basic language features. The c
 
 3. **L3 — `this` binding and constructor semantics**
    - Define method invocation context and object construction rules.
-   - This milestone becomes meaningful only after prototype/method dispatch exists.
+   - Landed in the current repo as a bounded surface: receiver-aware method calls, parenthesized `new`, and the narrow function `prototype` meta-property.
 
 ### Larger long-horizon targets
 
@@ -440,4 +442,3 @@ The following resources are the most useful starting set for building a project 
 
 - **The official Lua reference manuals** — not because `jsrt` is Lua-like in syntax, but because the Lua manuals show how to describe a compact dynamic language and runtime surface precisely.  
   https://www.lua.org/manual/
-

@@ -57,7 +57,7 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 - Object reads search own properties first, then walk the explicit prototype chain until a match is found or the chain ends.
 - Object writes remain receiver-local on the final write step; they do not climb the prototype chain to rewrite ancestors.
 - Inherited intermediate containers may still be resolved through prototypes during nested assignment (for example `obj.nested.value = 1` may mutate the inherited `nested` object).
-- Function values found through object property lookup are still called as plain functions; this milestone does **not** add implicit receiver / `this` binding.
+- Function values support a narrow constructor meta-surface through `prototype` / `["prototype"]`; arbitrary function properties remain unsupported.
 - Array assignment is in-bounds only.
 - Function argument passing and returns preserve aggregate identity instead of de-aliasing arrays/objects.
 - Object helper behavior remains own-only in L2: `len(obj)` counts own keys only, object equality ignores prototype identity and compares own properties only, and stringification displays only own keys.
@@ -73,7 +73,10 @@ Evidence:
 - Property reads check own properties first, then continue through the prototype chain until a match is found or lookup fails.
 - Direct property writes remain receiver-only; setting `obj.name = "child"` updates or creates `obj.name` rather than mutating an inherited `name`.
 - Nested assignment may resolve intermediate containers through the prototype chain, but the final write still mutates the resolved container value rather than selecting an ancestor as the write target.
-- `obj.method()` remains bounded L2 behavior: property lookup may find the function through the prototype chain, but the call still behaves like an ordinary function call with no implicit `this` binding.
+- `obj.method()` and `obj["method"]()` now bind `this` to the concrete receiver object, even when the function is found through the prototype chain.
+- Plain calls, extracted methods, and bare/top-level `this` use `this = null`.
+- `new Ctor(args)` is supported in the bounded L3 form only: the surface requires parentheses, native functions are not constructors, and unsupported constructor-result chaining stays out of scope.
+- Instances created by `new` use `Ctor.prototype` / `Ctor["prototype"]` when that slot is an object; `null` yields no prototype.
 - Object helpers remain own-only in L2: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
 
 Evidence:
@@ -99,7 +102,9 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- classes / `this` / `new`
+- classes / `super`
+- bare `new Ctor` without parentheses
+- constructor-result postfix chaining such as `new Ctor().field`
 - async / event loop behavior
 - broad ECMAScript coercion compatibility
 - sparse arrays / array growth on assignment

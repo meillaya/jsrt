@@ -353,6 +353,7 @@ void value_mark_reachable(Value value) {
                 return;
             }
             value.as.function->gc.marked = true;
+            value_mark_reachable(value.as.function->prototype);
             {
                 size_t i;
                 for (i = 0; i < value.as.function->capture_count; ++i) {
