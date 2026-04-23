@@ -11,8 +11,6 @@ Env *env_create(Env *parent) {
     gc_register_object(&env->gc, GC_OBJECT_ENV);
     env->parent = parent;
     env->head = NULL;
-    env->has_this = false;
-    env->this_value = value_null();
     return env;
 }
 
@@ -80,26 +78,6 @@ bool env_get(const Env *env, const char *name, Value *out_value) {
     return false;
 }
 
-void env_set_this(Env *env, Value value) {
-    if (env->has_this) {
-        value_free(env->this_value);
-    }
-    env->has_this = true;
-    env->this_value = value_clone(value);
-}
-
-bool env_get_this(const Env *env, Value *out_value) {
-    const Env *current = env;
-    while (current != NULL) {
-        if (current->has_this) {
-            *out_value = value_clone(current->this_value);
-            return true;
-        }
-        current = current->parent;
-    }
-    return false;
-}
-
 void env_mark_reachable(Env *env) {
     EnvEntry *entry;
 
@@ -108,9 +86,6 @@ void env_mark_reachable(Env *env) {
     }
 
     env->gc.marked = true;
-    if (env->has_this) {
-        value_mark_reachable(env->this_value);
-    }
     entry = env->head;
     while (entry != NULL) {
         value_mark_reachable(entry->value);

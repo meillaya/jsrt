@@ -131,28 +131,6 @@ void run_diagnostics_tests(TestContext *ctx) {
     );
     free(error);
 
-    error = parse_error_for("new Foo;\n");
-    EXPECT_TRUE(ctx, error != NULL);
-    EXPECT_STRING_EQ(
-        ctx,
-        error,
-        "Parser error at 1:8: expected '(' after constructor target in 'new' expression\n"
-        "new Foo;\n"
-        "       ^"
-    );
-    free(error);
-
-    error = parse_error_for("new (Foo)();\n");
-    EXPECT_TRUE(ctx, error != NULL);
-    EXPECT_STRING_EQ(
-        ctx,
-        error,
-        "Parser error at 1:5: unsupported parenthesized constructor target in 'new' expression\n"
-        "new (Foo)();\n"
-        "    ^"
-    );
-    free(error);
-
     error = parse_error_for(
         "let broken = [1, 2;\n"
         "while nope { let x = 1; }\n"
@@ -171,28 +149,6 @@ void run_diagnostics_tests(TestContext *ctx) {
         "Parser error at 2:25: expected expression\n"
         "while nope { let x = 1; }\n"
         "                        ^"
-    );
-    free(error);
-
-    error = parse_error_for("new Box;");
-    EXPECT_TRUE(ctx, error != NULL);
-    EXPECT_STRING_EQ(
-        ctx,
-        error,
-        "Parser error at 1:8: expected '(' after constructor target in 'new' expression\n"
-        "new Box;\n"
-        "       ^"
-    );
-    free(error);
-
-    error = parse_error_for("new )");
-    EXPECT_TRUE(ctx, error != NULL);
-    EXPECT_STRING_EQ(
-        ctx,
-        error,
-        "Parser error at 1:5: expected constructor target after 'new'\n"
-        "new )\n"
-        "    ^"
     );
     free(error);
 
@@ -252,23 +208,6 @@ void run_diagnostics_tests(TestContext *ctx) {
             "Runtime error [arity] at 1:6: expected 1 arguments but got 0\n"
             "print();\n"
             "     ^"
-        );
-        eval_result_free(&result);
-    }
-
-    {
-        EvalResult result = eval_result_for(
-            "function Box() {}\n"
-            "Box.extra;\n"
-        );
-        EXPECT_TRUE(ctx, result.had_error);
-        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_TYPE);
-        EXPECT_STRING_EQ(
-            ctx,
-            result.error_message,
-            "Runtime error [type] at 2:4: function property access only supports 'prototype'\n"
-            "Box.extra;\n"
-            "   ^"
         );
         eval_result_free(&result);
     }

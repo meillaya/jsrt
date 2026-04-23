@@ -348,67 +348,6 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(obj, proto);\n"
         "obj.speak();\n"
     );
-    assert_backend_parity(ctx, "this;\n");
-    assert_backend_parity(
-        ctx,
-        "let proto = {get: function () { return this.value; }};\n"
-        "let obj = {value: 11};\n"
-        "setPrototypeOf(obj, proto);\n"
-        "obj.get() + obj[\"get\"]();\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "let obj = {value: 11, get: function () { return this == null; }};\n"
-        "let extracted = obj.get;\n"
-        "extracted();\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "function Ctor(value) {\n"
-        "  this.value = value;\n"
-        "}\n"
-        "Ctor.prototype.get = function () { return this.value; };\n"
-        "let instance = new Ctor(9);\n"
-        "instance.get();\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "function PrimitiveReturn() {\n"
-        "  this.value = 4;\n"
-        "  return 99;\n"
-        "}\n"
-        "let instance = new PrimitiveReturn();\n"
-        "instance.value;\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "function ObjectReturn() {\n"
-        "  this.value = 4;\n"
-        "  return {value: 12};\n"
-        "}\n"
-        "let instance = new ObjectReturn();\n"
-        "instance.value;\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "function Ctor() {}\n"
-        "Ctor[\"prototype\"] = {answer: 8};\n"
-        "let instance = new Ctor();\n"
-        "instance.answer;\n"
-    );
-    assert_backend_error_contains(
-        ctx,
-        "function Ctor() {}\n"
-        "Ctor.prototype = 3;\n",
-        "function prototype must be an object or null"
-    );
-    assert_backend_error_contains(
-        ctx,
-        "function Ctor() {}\n"
-        "Ctor.extra;\n",
-        "function property access only supports 'prototype'"
-    );
-    assert_backend_error_contains(ctx, "new len(\"abc\");\n", "attempted to construct a non-constructor value");
     assert_backend_parity(
         ctx,
         "let proto = {hidden: 1};\n"
@@ -434,52 +373,6 @@ void run_vm_tests(TestContext *ctx) {
         "obj;\n",
         "{shown: 2}"
     );
-    assert_backend_value_text(ctx, "this;\n", "null");
-    assert_backend_value_text(
-        ctx,
-        "let proto = {label: function () { return this.name; }};\n"
-        "let obj = {name: \"jsrt\"};\n"
-        "setPrototypeOf(obj, proto);\n"
-        "obj.label() + \":\" + obj[\"label\"]();\n",
-        "jsrt:jsrt"
-    );
-    assert_backend_value_text(
-        ctx,
-        "let proto = {capture: function () { return this; }};\n"
-        "let obj = {};\n"
-        "setPrototypeOf(obj, proto);\n"
-        "let fn = obj.capture;\n"
-        "typeOf(fn());\n",
-        "null"
-    );
-    assert_backend_value_text(
-        ctx,
-        "function Box(name) { this.name = name; }\n"
-        "Box.prototype = {label: function () { return this.name; }};\n"
-        "let box = new Box(\"crate\");\n"
-        "box.label();\n",
-        "crate"
-    );
-    assert_backend_value_text(
-        ctx,
-        "function PrimitiveBox() { this.label = \"kept\"; return 1; }\n"
-        "let item = new PrimitiveBox();\n"
-        "item.label;\n",
-        "kept"
-    );
-    assert_backend_value_text(
-        ctx,
-        "let holder = {ctor: function (name) { this.name = name; return {wrapped: name}; }};\n"
-        "let result = new holder[\"ctor\"](\"boxed\");\n"
-        "result.wrapped;\n",
-        "boxed"
-    );
-    assert_backend_value_text(
-        ctx,
-        "function Box() {}\n"
-        "typeOf(Box.prototype) + \":\" + typeOf(len.prototype);\n",
-        "object:null"
-    );
     assert_backend_error_contains(
         ctx,
         "let proto = {name: \"base\"};\n"
@@ -503,24 +396,6 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(a, b);\n"
         "setPrototypeOf(b, a);\n",
         "setPrototypeOf() cannot create a prototype cycle"
-    );
-    assert_backend_error_contains(ctx, "new len(\"x\");\n", "attempted to construct a non-constructor value");
-    assert_backend_error_contains(
-        ctx,
-        "function Box() {}\n"
-        "Box.prototype = 1;\n",
-        "function prototype assignment expects an object or null value"
-    );
-    assert_backend_error_contains(
-        ctx,
-        "function Box() {}\n"
-        "Box.extra;\n",
-        "function property access only supports 'prototype'"
-    );
-    assert_backend_error_contains(
-        ctx,
-        "len.prototype = {};\n",
-        "native functions do not support prototype assignment"
     );
 
     {
@@ -558,58 +433,6 @@ void run_vm_tests(TestContext *ctx) {
         eval_result_free(&result);
     }
 
-    assert_backend_parity(ctx, "this;\n");
-    assert_backend_parity(
-        ctx,
-        "let proto = {get: function () { return this.value; }};\n"
-        "function Box(value) { this.value = value; }\n"
-        "Box.prototype = proto;\n"
-        "let box = new Box(7);\n"
-        "box.get();\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "let proto = {get: function () { return this.value; }};\n"
-        "function Box(value) { this.value = value; }\n"
-        "Box[\"prototype\"] = proto;\n"
-        "let box = new Box(7);\n"
-        "box[\"get\"]();\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "let proto = {who: function () { return this; }};\n"
-        "function Box() {}\n"
-        "Box.prototype = proto;\n"
-        "let box = new Box();\n"
-        "let who = box.who;\n"
-        "who();\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "function Wrapper() { return 1; }\n"
-        "typeOf(new Wrapper());\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "function Wrapper() { return {value: 9}; }\n"
-        "let wrapped = new Wrapper();\n"
-        "wrapped.value;\n"
-    );
-    assert_backend_parity(
-        ctx,
-        "let trace = \"\";\n"
-        "let obj = {m: function (x) { return trace + \":\" + x; }};\n"
-        "function base() { trace = trace + \"B\"; return obj; }\n"
-        "function key() { trace = trace + \"K\"; return \"m\"; }\n"
-        "function arg() { trace = trace + \"A\"; return \"!\"; }\n"
-        "base()[key()](arg());\n"
-    );
-    assert_backend_error_contains(ctx, "let f = function () {};\nf.prototype = 1;\n", "function prototype assignment expects an object or null");
-    assert_backend_error_contains(ctx, "let f = function () {};\nf.x;\n", "function property access only supports 'prototype'");
-    assert_backend_error_contains(ctx, "let f = function () {};\nf[1];\n", "function indexing expects the string key 'prototype'");
-    assert_backend_error_contains(ctx, "new 1();\n", "attempted to construct a non-function value");
-    assert_backend_error_contains(ctx, "new print(\"x\");\n", "native functions are not constructors");
-
     {
         FILE *file;
         char buffer[128];
@@ -632,19 +455,6 @@ void run_vm_tests(TestContext *ctx) {
         if (file != NULL) {
             EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
             EXPECT_STRING_EQ(ctx, buffer, "1:new:8:7\n");
-            fclose(file);
-        }
-    }
-
-    {
-        FILE *file;
-        char buffer[128];
-        EXPECT_INT_EQ(ctx, system("JSRT_BACKEND=vm ./build/jsrt examples/constructors.js > build/constructors-example.out"), 0);
-        file = fopen("build/constructors-example.out", "r");
-        EXPECT_TRUE(ctx, file != NULL);
-        if (file != NULL) {
-            EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
-            EXPECT_STRING_EQ(ctx, buffer, "hello Ada\n");
             fclose(file);
         }
     }

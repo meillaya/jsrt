@@ -43,15 +43,6 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 - [ ] `docs/semantics-baseline.md` is updated to describe the bounded L2 surface, while keeping `this` / `new` / constructors / classes deferred to L3
 - [ ] the ASan lane is re-run after the final object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
-## L3 `this` / constructor exit gates
-
-- [ ] top-level `this = null` is locked in for both evaluator and VM
-- [ ] method calls bind `this` to the evaluated receiver for dot + bracket call forms, including prototype-inherited methods
-- [ ] extracted/plain calls still use `this = null`
-- [ ] `new Ctor(args...)` allocates an instance, respects constructor return rules, and uses the bounded function `prototype` slot
-- [ ] negative coverage locks in bare-`new`, parenthesized/call-expression constructor-target rejection, invalid function `prototype` writes, non-`prototype` function properties, and native-function construction failure
-- [ ] bytecode evidence explicitly covers `BC_CALL_METHOD`, `BC_ALLOC_INSTANCE`, and `BC_CALL_NEW`
-
 ## Design-heavy milestones
 
 - [ ] architect review completed

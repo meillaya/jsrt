@@ -185,29 +185,6 @@ void run_bytecode_tests(TestContext *ctx) {
 
     {
         const char *source =
-            "function Ctor(value) {\n"
-            "  this.value = value;\n"
-            "}\n"
-            "Ctor.prototype.get = function () { return this.value; };\n"
-            "let obj = new Ctor(7);\n"
-            "obj.get();\n";
-        BytecodeProgram program;
-        char *error = NULL;
-        char *disassembly;
-
-        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
-        EXPECT_TRUE(ctx, error == NULL);
-        disassembly = bytecode_disassemble_program(&program);
-        EXPECT_TRUE(ctx, strstr(disassembly, "LOAD_THIS") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "ALLOC_INSTANCE") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
-        free(disassembly);
-        bytecode_program_free(&program);
-    }
-
-    {
-        const char *source =
             "let total = 0;\n"
             "do {\n"
             "  total = total + 1;\n"
@@ -229,29 +206,6 @@ void run_bytecode_tests(TestContext *ctx) {
         EXPECT_TRUE(ctx, strstr(disassembly, "LOOP") != NULL);
         EXPECT_TRUE(ctx, strstr(disassembly, "JUMP_IF_FALSE") != NULL);
         EXPECT_TRUE(ctx, strstr(disassembly, "JUMP") != NULL);
-        free(disassembly);
-        bytecode_program_free(&program);
-    }
-
-    {
-        const char *source =
-            "let proto = {get: function () { return this.value; }};\n"
-            "function Box(value) { this.value = value; }\n"
-            "Box.prototype = proto;\n"
-            "let box = new Box(7);\n"
-            "box.get();\n";
-        BytecodeProgram program;
-        char *error = NULL;
-        char *disassembly;
-
-        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
-        EXPECT_TRUE(ctx, error == NULL);
-        disassembly = bytecode_disassemble_program(&program);
-        EXPECT_TRUE(ctx, strstr(disassembly, "LOAD_THIS") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "GET_INDEX_KEEP") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "MAKE_INSTANCE") != NULL);
-        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
         free(disassembly);
         bytecode_program_free(&program);
     }

@@ -41,7 +41,6 @@ typedef struct ControlContext {
 typedef struct Compiler {
     BytecodeProgram *program;
     BytecodeFunction *function;
-    size_t function_index;
     const char *source;
     struct Compiler *parent;
     Local *locals;
@@ -325,7 +324,6 @@ static bool compile_function_body(
 
     child.program = parent->program;
     child.function = function;
-    child.function_index = (size_t)function_index;
     child.source = parent->source;
     child.parent = parent;
     child.locals = NULL;
@@ -347,9 +345,8 @@ static bool compile_function_body(
         free(child.locals);
         return false;
     }
-    child.function = &child.program->functions[child.function_index];
-    emit_instruction(child.function, BC_NULL, 0);
-    emit_instruction(child.function, BC_RETURN, 0);
+    emit_instruction(function, BC_NULL, 0);
+    emit_instruction(function, BC_RETURN, 0);
     free(child.locals);
     *out_index = function_index;
     return true;
@@ -388,57 +385,14 @@ static bool compile_logical(Compiler *compiler, const Expr *expr, char **error_m
     return set_compile_error(compiler->source, expr->line, expr->column, 2, "unsupported logical operator in compiler", error_message);
 }
 
-static bool compile_method_call(
-    Compiler *compiler,
-    const Expr *callee,
-    const ExprArray *arguments,
-    char **error_message
-) {
-    size_t i;
-
-    if (callee->kind == EXPR_PROPERTY) {
-        if (!compile_expression(compiler, callee->as.property.target, error_message)) {
-            return false;
-        }
-        emit_instruction(compiler->function, BC_DUP, 0);
-        emit_instruction(
-            compiler->function,
-            BC_CONST,
-            add_constant(compiler->function, value_string(callee->as.property.name))
-        );
-        emit_instruction(compiler->function, BC_GET_INDEX, 0);
-        emit_instruction(compiler->function, BC_SWAP, 0);
-    } else {
-        if (!compile_expression(compiler, callee->as.index.target, error_message)) {
-            return false;
-        }
-        emit_instruction(compiler->function, BC_DUP, 0);
-        if (!compile_expression(compiler, callee->as.index.index, error_message)) {
-            return false;
-        }
-        emit_instruction(compiler->function, BC_GET_INDEX, 0);
-        emit_instruction(compiler->function, BC_SWAP, 0);
-    }
-
-    for (i = 0; i < arguments->count; ++i) {
-        if (!compile_expression(compiler, arguments->items[i], error_message)) {
-            return false;
-        }
-    }
-
-    emit_instruction(compiler->function, BC_CALL_METHOD, (int)arguments->count);
-    return true;
-}
-
-static bool assignment_root_is_bindable(const Expr *expr) {
+static bool assignment_root_is_identifier(const Expr *expr) {
     switch (expr->kind) {
         case EXPR_IDENTIFIER:
-        case EXPR_THIS:
             return true;
         case EXPR_PROPERTY:
-            return assignment_root_is_bindable(expr->as.property.target);
+            return assignment_root_is_identifier(expr->as.property.target);
         case EXPR_INDEX:
-            return assignment_root_is_bindable(expr->as.index.target);
+            return assignment_root_is_identifier(expr->as.index.target);
         default:
             return false;
     }
@@ -467,37 +421,6 @@ static bool compile_assignment_target_container_and_key(Compiler *compiler, cons
     }
 }
 
-static bool compile_method_callee(Compiler *compiler, const Expr *callee, char **error_message) {
-    switch (callee->kind) {
-        case EXPR_PROPERTY:
-            if (!compile_expression(compiler, callee->as.property.target, error_message)) {
-                return false;
-            }
-            emit_instruction(compiler->function, BC_DUP, 0);
-            emit_instruction(
-                compiler->function,
-                BC_CONST,
-                add_constant(compiler->function, value_string(callee->as.property.name))
-            );
-            emit_instruction(compiler->function, BC_GET_INDEX, 0);
-            emit_instruction(compiler->function, BC_SWAP, 0);
-            return true;
-        case EXPR_INDEX:
-            if (!compile_expression(compiler, callee->as.index.target, error_message)) {
-                return false;
-            }
-            emit_instruction(compiler->function, BC_DUP, 0);
-            if (!compile_expression(compiler, callee->as.index.index, error_message)) {
-                return false;
-            }
-            emit_instruction(compiler->function, BC_GET_INDEX, 0);
-            emit_instruction(compiler->function, BC_SWAP, 0);
-            return true;
-        default:
-            return false;
-    }
-}
-
 static bool compile_expression(Compiler *compiler, const Expr *expr, char **error_message) {
     size_t i;
 
@@ -520,9 +443,6 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             break;
         case EXPR_IDENTIFIER:
             return compile_identifier_load(compiler, expr->as.identifier.name, expr->line, expr->column, error_message);
-        case EXPR_THIS:
-            emit_instruction(compiler->function, BC_LOAD_THIS, 0);
-            return true;
         case EXPR_UNARY:
             if (!compile_expression(compiler, expr->as.unary.operand, error_message)) {
                 return false;
@@ -565,8 +485,8 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                 emit_instruction(compiler->function, BC_DUP, 0);
                 return compile_identifier_store(compiler, expr->as.assign.target->as.identifier.name, expr->line, expr->column, error_message);
             }
-            if (!assignment_root_is_bindable(expr->as.assign.target)) {
-                return set_compile_error(compiler->source, expr->line, expr->column, 1, "assignment target must start with a variable or this", error_message);
+            if (!assignment_root_is_identifier(expr->as.assign.target)) {
+                return set_compile_error(compiler->source, expr->line, expr->column, 1, "assignment target must start with a variable", error_message);
             }
             if (!compile_assignment_target_container_and_key(compiler, expr->as.assign.target, error_message) ||
                 !compile_expression(compiler, expr->as.assign.value, error_message)) {
@@ -575,11 +495,7 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
             emit_instruction(compiler->function, BC_SET_INDEX, 0);
             return true;
         case EXPR_CALL:
-            if ((expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX) &&
-                !compile_method_callee(compiler, expr->as.call.callee, error_message)) {
-                return false;
-            } else if (expr->as.call.callee->kind != EXPR_PROPERTY && expr->as.call.callee->kind != EXPR_INDEX &&
-                       !compile_expression(compiler, expr->as.call.callee, error_message)) {
+            if (!compile_expression(compiler, expr->as.call.callee, error_message)) {
                 return false;
             }
             for (i = 0; i < expr->as.call.arguments.count; ++i) {
@@ -587,25 +503,7 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                     return false;
                 }
             }
-            emit_instruction(
-                compiler->function,
-                (expr->as.call.callee->kind == EXPR_PROPERTY || expr->as.call.callee->kind == EXPR_INDEX)
-                    ? BC_CALL_METHOD
-                    : BC_CALL,
-                (int)expr->as.call.arguments.count
-            );
-            return true;
-        case EXPR_NEW:
-            if (!compile_expression(compiler, expr->as.new_expr.callee, error_message)) {
-                return false;
-            }
-            for (i = 0; i < expr->as.new_expr.arguments.count; ++i) {
-                if (!compile_expression(compiler, expr->as.new_expr.arguments.items[i], error_message)) {
-                    return false;
-                }
-            }
-            emit_instruction(compiler->function, BC_ALLOC_INSTANCE, (int)expr->as.new_expr.arguments.count);
-            emit_instruction(compiler->function, BC_CALL_NEW, (int)expr->as.new_expr.arguments.count);
+            emit_instruction(compiler->function, BC_CALL, (int)expr->as.call.arguments.count);
             return true;
         case EXPR_FUNCTION: {
             int function_index;
@@ -620,7 +518,6 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                     &function_index)) {
                 return false;
             }
-            compiler->function = &compiler->program->functions[compiler->function_index];
             emit_instruction(compiler->function, BC_MAKE_FUNCTION, function_index);
             return true;
         }
@@ -662,18 +559,6 @@ static bool compile_expression(Compiler *compiler, const Expr *expr, char **erro
                 add_constant(compiler->function, value_string(expr->as.property.name))
             );
             emit_instruction(compiler->function, BC_GET_INDEX, 0);
-            return true;
-        case EXPR_NEW:
-            if (!compile_expression(compiler, expr->as.new_expr.callee, error_message)) {
-                return false;
-            }
-            for (i = 0; i < expr->as.new_expr.arguments.count; ++i) {
-                if (!compile_expression(compiler, expr->as.new_expr.arguments.items[i], error_message)) {
-                    return false;
-                }
-            }
-            emit_instruction(compiler->function, BC_NEW_INSTANCE, (int)expr->as.new_expr.arguments.count);
-            emit_instruction(compiler->function, BC_CALL_NEW, (int)expr->as.new_expr.arguments.count);
             return true;
     }
 
@@ -1028,7 +913,6 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
                     &function_index)) {
                 return false;
             }
-            compiler->function = &compiler->program->functions[compiler->function_index];
             emit_instruction(compiler->function, BC_MAKE_FUNCTION, function_index);
             if (compiler->is_script && compiler->scope_depth == 0) {
                 emit_instruction(compiler->function, BC_DEFINE_GLOBAL, add_global_symbol(compiler->program, stmt->as.function.name));
@@ -1084,7 +968,6 @@ bool compile_program(const StmtArray *program, const char *source, BytecodeProgr
 
     compiler.program = out_program;
     compiler.function = script;
-    compiler.function_index = 0U;
     compiler.source = source;
     compiler.parent = NULL;
     compiler.locals = NULL;
@@ -1112,11 +995,10 @@ bool compile_program(const StmtArray *program, const char *source, BytecodeProgr
         }
     }
 
-    compiler.function = &compiler.program->functions[compiler.function_index];
     if (program->count == 0U || program->items[program->count - 1U]->kind != STMT_EXPR) {
-        emit_instruction(compiler.function, BC_NULL, 0);
+        emit_instruction(script, BC_NULL, 0);
     }
-    emit_instruction(compiler.function, BC_RETURN, 0);
+    emit_instruction(script, BC_RETURN, 0);
     free(compiler.locals);
     return true;
 }

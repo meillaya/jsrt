@@ -237,7 +237,7 @@ Achieved so far:
 - recursive-descent parser with recovery and aggregated parse errors
 - explicit AST with clear ownership rules
 - variables, assignment, functions, closures, and function expressions
-- strings, arrays, objects, explicit prototype-chain lookup, and shared-reference aggregate semantics
+- strings, arrays, objects, and shared-reference aggregate semantics
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - `const` declarations
 - built-ins `print`, `len`, and `typeOf`
@@ -295,7 +295,7 @@ The project is intentionally incomplete. That is a feature, not a flaw, because 
 
 Still outside scope today:
 - modules and multi-file execution
-- classes / `super` / class-field semantics
+- classes, prototypes, `this`, and `new`
 - async/event loop semantics
 - broad ECMAScript coercion and compatibility
 - JIT or optimization passes
@@ -374,23 +374,21 @@ JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js
 
 ## 11. Next major milestones
 
-The immediate next major milestones now sit at the boundary between the remaining core language semantics and the broader architecture/measurement work that follows them.
+The immediate next major milestones are no longer basic language features. The codebase has reached the point where the next valuable work is about scale, architecture, and measurement.
 
 ### Near-next execution targets
-
-L2 prototype-chain lookup is now part of the bounded runtime surface. The next execution targets build on that base.
 
 1. **L1 — Benchmark and profiling harness**
    - Add a repeatable performance corpus and measurement harness.
    - Establish baseline numbers before optimization or architecture expansion.
 
-2. **L4 — Class syntax and desugaring/direct support**
-   - Layer class syntax on top of the bounded constructor/prototype runtime.
-   - Keep the runtime model narrow unless syntax support proves more primitives are necessary.
+2. **L2 — Prototype chain and method dispatch**
+   - Introduce inheritance-style object lookup semantics.
+   - This is the first major step from “object literals” toward a richer JavaScript object model.
 
 3. **L3 — `this` binding and constructor semantics**
    - Define method invocation context and object construction rules.
-   - Landed as a bounded runtime surface: top-level `this = null`, receiver-aware method calls, `new Ctor(args...)`, and a narrow function `prototype` slot without classes or general function-object bags.
+   - This milestone becomes meaningful only after prototype/method dispatch exists.
 
 ### Larger long-horizon targets
 
@@ -442,3 +440,4 @@ The following resources are the most useful starting set for building a project 
 
 - **The official Lua reference manuals** — not because `jsrt` is Lua-like in syntax, but because the Lua manuals show how to describe a compact dynamic language and runtime surface precisely.  
   https://www.lua.org/manual/
+

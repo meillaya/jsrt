@@ -194,12 +194,6 @@ Expr *ast_new_identifier(const char *name, int line, int column) {
     return expr;
 }
 
-Expr *ast_new_this(int line, int column) {
-    Expr *expr = alloc_expr(EXPR_THIS, line, column);
-    expr->as.this_expr.reserved = 0;
-    return expr;
-}
-
 Expr *ast_new_unary(TokenType op, Expr *operand, int line, int column) {
     Expr *expr = alloc_expr(EXPR_UNARY, line, column);
     expr->as.unary.op = op;
@@ -237,13 +231,6 @@ Expr *ast_new_call(Expr *callee, ExprArray arguments, int line, int column) {
     return expr;
 }
 
-Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column) {
-    Expr *expr = alloc_expr(EXPR_NEW, line, column);
-    expr->as.new_expr.callee = callee;
-    expr->as.new_expr.arguments = arguments;
-    return expr;
-}
-
 Expr *ast_new_function_expr(const char *name, StringArray params, StmtArray body, int line, int column) {
     Expr *expr = alloc_expr(EXPR_FUNCTION, line, column);
     expr->as.function.name = name != NULL ? jsrt_strdup(name) : NULL;
@@ -275,17 +262,6 @@ Expr *ast_new_property(Expr *target, const char *name, int line, int column) {
     Expr *expr = alloc_expr(EXPR_PROPERTY, line, column);
     expr->as.property.target = target;
     expr->as.property.name = jsrt_strdup(name);
-    return expr;
-}
-
-Expr *ast_new_this(int line, int column) {
-    return alloc_expr(EXPR_THIS, line, column);
-}
-
-Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column) {
-    Expr *expr = alloc_expr(EXPR_NEW, line, column);
-    expr->as.new_expr.callee = callee;
-    expr->as.new_expr.arguments = arguments;
     return expr;
 }
 
@@ -383,8 +359,6 @@ void expr_destroy(Expr *expr) {
         case EXPR_IDENTIFIER:
             free(expr->as.identifier.name);
             break;
-        case EXPR_THIS:
-            break;
         case EXPR_UNARY:
             expr_destroy(expr->as.unary.operand);
             break;
@@ -404,10 +378,6 @@ void expr_destroy(Expr *expr) {
             expr_destroy(expr->as.call.callee);
             expr_array_free(&expr->as.call.arguments);
             break;
-        case EXPR_NEW:
-            expr_destroy(expr->as.new_expr.callee);
-            expr_array_free(&expr->as.new_expr.arguments);
-            break;
         case EXPR_FUNCTION:
             free(expr->as.function.name);
             string_array_free(&expr->as.function.params);
@@ -426,12 +396,6 @@ void expr_destroy(Expr *expr) {
         case EXPR_PROPERTY:
             expr_destroy(expr->as.property.target);
             free(expr->as.property.name);
-            break;
-        case EXPR_THIS:
-            break;
-        case EXPR_NEW:
-            expr_destroy(expr->as.new_expr.callee);
-            expr_array_free(&expr->as.new_expr.arguments);
             break;
     }
 

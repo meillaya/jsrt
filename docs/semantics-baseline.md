@@ -17,7 +17,7 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 | Booleans | `true`/`false`, truthiness in control flow | `tests/test_eval.c`, `examples/branching.js` |
 | Null | `null` literal; falsy; final `null` is not printed by CLI | `src/main.c`, evaluator behavior |
 | Strings | string literals with basic escapes, concatenation with `+`, equality | `tests/test_lexer.c`, `tests/test_eval.c`, `examples/strings.js` |
-| Functions | declarations, calls, closures, `return`, receiver-bound `this`, bounded constructor `prototype` slots, and `new Ctor(args)` construction | `tests/test_eval.c`, `tests/test_vm.c`, `examples/functions.js`, `examples/constructors.js` |
+| Functions | declarations, calls, closures, `return` | `tests/test_eval.c`, `examples/functions.js` |
 | Arrays | literals, indexing, equality by deep element comparison | `tests/test_eval.c`, `examples/arrays_objects.js` |
 | Objects | literals, dot/bracket access, explicit prototype linkage via `setPrototypeOf`, own-first then prototype-chain lookup, equality by ordered own key/value comparison | `tests/test_eval.c`, `src/eval.c`, `src/vm.c`, `src/value.c`, `examples/arrays_objects.js` |
 
@@ -57,23 +57,23 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 - Object reads search own properties first, then walk the explicit prototype chain until a match is found or the chain ends.
 - Object writes remain receiver-local on the final write step; they do not climb the prototype chain to rewrite ancestors.
 - Inherited intermediate containers may still be resolved through prototypes during nested assignment (for example `obj.nested.value = 1` may mutate the inherited `nested` object).
-- Function values found through object property lookup now receive the original receiver as `this`; extracted/plain calls still use `this = null`.
+- Function values found through object property lookup are still called as plain functions; this milestone does **not** add implicit receiver / `this` binding.
 - Array assignment is in-bounds only.
 - Function argument passing and returns preserve aggregate identity instead of de-aliasing arrays/objects.
-- Array assignment is in-bounds only.
 - Object helper behavior remains own-only in L2: `len(obj)` counts own keys only, object equality ignores prototype identity and compares own properties only, and stringification displays only own keys.
 - Self-referential arrays/objects can now arise through assignment; stringification and equality remain cycle-safe instead of recursing forever.
 
 Evidence:
 - `tests/test_eval.c` covers alias-visible mutation, nested assignment, function-call/reference flow, property creation, cycle-safe output/equality, and array assignment bounds.
 
-## Prototype-chain / `this` / constructor baseline
+## Prototype-chain / method-dispatch baseline
 
 - Objects now carry an optional prototype reference.
 - Prototype linkage is explicit through `setPrototypeOf(obj, protoOrNull)`; there is no object-literal `__proto__` syntax.
 - Property reads check own properties first, then continue through the prototype chain until a match is found or lookup fails.
 - Direct property writes remain receiver-only; setting `obj.name = "child"` updates or creates `obj.name` rather than mutating an inherited `name`.
 - Nested assignment may resolve intermediate containers through the prototype chain, but the final write still mutates the resolved container value rather than selecting an ancestor as the write target.
+- `obj.method()` remains bounded L2 behavior: property lookup may find the function through the prototype chain, but the call still behaves like an ordinary function call with no implicit `this` binding.
 - Object helpers remain own-only in L2: `len(obj)` counts own keys only, object equality compares own properties only, and object stringification displays own properties only.
 
 Evidence:
@@ -82,31 +82,12 @@ Evidence:
 - `src/vm.c`
 - `src/value.c`
 
-## L3 `this` / constructor baseline
-
-- Bare/top-level `this` resolves to `null`.
-- Property/index calls (`obj.method()` / `obj["method"]()`) bind `this` to the evaluated receiver object, even when the function is found through the prototype chain.
-- Extracted/plain calls continue to run with `this = null`.
-- `new Ctor(args...)` allocates a fresh object, binds `this` to it for the constructor body, and applies `Ctor.prototype` when that slot is an object.
-- Constructor returns follow the bounded L3 rule: explicit object/array/function returns replace the default instance; primitive/null returns do not.
-- Function property support remains intentionally narrow: only `prototype` / `["prototype"]` is supported; other function property reads/writes fail with runtime type diagnostics.
-- Native functions are not constructors. Reading `builtin.prototype` yields `null`, writing it fails, and `new builtin(...)` raises a runtime type diagnostic.
-
-Evidence:
-- `tests/test_eval.c`
-- `tests/test_vm.c`
-- `tests/test_bytecode.c`
-- `src/eval.c`
-- `src/compiler.c`
-- `src/vm.c`
-
 ## Parser / diagnostics baseline
 
 - Parser is recursive-descent and supports aggregated syntax diagnostics after recovery to later statement boundaries.
 - Diagnostics include source lines and caret markers.
 - Runtime diagnostics are categorized (`type`, `name`, `arity`, `lookup`, `assignment`, `control-flow`, `index`, `math`, `internal`) while preserving the underlying message text.
 - Invalid top-level loop control and invalid assignment/index/property operations fail with runtime diagnostics, not silent fallback behavior.
-- `this` and `new` are parser keywords; bounded unsupported `new` forms (for example bare `new Ctor`) fail in the front-end with source diagnostics.
 
 Evidence:
 - `tests/test_parser.c`
@@ -118,12 +99,11 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- classes
+- classes / `this` / `new`
 - async / event loop behavior
 - broad ECMAScript coercion compatibility
 - sparse arrays / array growth on assignment
 - assignment through arbitrary non-variable roots like `makeObj().x = 1`
-- broad `new` callee shapes beyond the bounded L3 surface (for example bare `new Ctor` or chained `new foo()(1)`)
 
 ## Interpretation rule for later milestones
 

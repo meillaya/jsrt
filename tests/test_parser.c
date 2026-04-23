@@ -120,21 +120,6 @@ void run_parser_tests(TestContext *ctx) {
     stmt_array_free(&program);
 
     program = parse_program_or_fail(ctx,
-        "this;\n"
-        "new Thing(1, 2);\n"
-        "new registry.builders[0](seed);\n"
-    );
-    EXPECT_SIZE_EQ(ctx, program.count, 3U);
-    EXPECT_INT_EQ(ctx, program.items[0]->as.expr.expression->kind, EXPR_THIS);
-    EXPECT_INT_EQ(ctx, program.items[1]->as.expr.expression->kind, EXPR_NEW);
-    EXPECT_INT_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.callee->kind, EXPR_IDENTIFIER);
-    EXPECT_SIZE_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.arguments.count, 2U);
-    EXPECT_INT_EQ(ctx, program.items[2]->as.expr.expression->kind, EXPR_NEW);
-    EXPECT_INT_EQ(ctx, program.items[2]->as.expr.expression->as.new_expr.callee->kind, EXPR_INDEX);
-    EXPECT_SIZE_EQ(ctx, program.items[2]->as.expr.expression->as.new_expr.arguments.count, 1U);
-    stmt_array_free(&program);
-
-    program = parse_program_or_fail(ctx,
         "const x = 3;\n"
         "{ const x = 4; }\n"
     );
@@ -142,20 +127,6 @@ void run_parser_tests(TestContext *ctx) {
     EXPECT_INT_EQ(ctx, program.items[0]->kind, STMT_VAR);
     EXPECT_TRUE(ctx, program.items[0]->as.var.is_const);
     EXPECT_INT_EQ(ctx, program.items[1]->kind, STMT_BLOCK);
-    stmt_array_free(&program);
-
-    program = parse_program_or_fail(ctx,
-        "this;\n"
-        "new Thing(1, 2);\n"
-        "new registry[\"Thing\"]();\n"
-    );
-    EXPECT_SIZE_EQ(ctx, program.count, 3U);
-    EXPECT_INT_EQ(ctx, program.items[0]->as.expr.expression->kind, EXPR_THIS);
-    EXPECT_INT_EQ(ctx, program.items[1]->as.expr.expression->kind, EXPR_NEW);
-    EXPECT_INT_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.callee->kind, EXPR_IDENTIFIER);
-    EXPECT_SIZE_EQ(ctx, program.items[1]->as.expr.expression->as.new_expr.arguments.count, 2U);
-    EXPECT_INT_EQ(ctx, program.items[2]->as.expr.expression->kind, EXPR_NEW);
-    EXPECT_INT_EQ(ctx, program.items[2]->as.expr.expression->as.new_expr.callee->kind, EXPR_INDEX);
     stmt_array_free(&program);
 
     {
@@ -262,18 +233,6 @@ void run_parser_tests(TestContext *ctx) {
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "const x;", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
         EXPECT_TRUE(ctx, strstr(error, "const declarations require an initializer") != NULL);
-        if (error != NULL) {
-            free(error);
-        }
-        token_array_free(&tokens);
-
-        EXPECT_TRUE(ctx, lex_source("new Thing;", &tokens, &error));
-        if (error != NULL) {
-            free(error);
-        }
-        EXPECT_FALSE(ctx, parse_tokens(&tokens, "new Thing;", &program, &error));
-        EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "expected '(' after constructor target in 'new' expression") != NULL);
         if (error != NULL) {
             free(error);
         }
