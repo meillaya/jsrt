@@ -189,6 +189,15 @@ void run_vm_tests(TestContext *ctx) {
     );
     assert_backend_parity(
         ctx,
+        "let proto = {name: \"base\", nested: {value: 0}};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.nested.value = 1;\n"
+        "obj.name = \"child\";\n"
+        "len(obj) + \":\" + obj.name + \":\" + proto.name + \":\" + proto.nested.value;\n"
+    );
+    assert_backend_parity(
+        ctx,
         "let out = 0;\n"
         "switch (2) {\n"
         "  case 1:\n"
@@ -215,6 +224,24 @@ void run_vm_tests(TestContext *ctx) {
         "} while (i < 4);\n"
         "total;\n"
     );
+
+    {
+        char *error = NULL;
+        EvalResult result = eval_vm_source(
+            "let proto = {name: \"base\", nested: {value: 0}};\n"
+            "let obj = {};\n"
+            "setPrototypeOf(obj, proto);\n"
+            "obj.nested.value = 1;\n"
+            "obj.name = \"child\";\n"
+            "len(obj) + \":\" + obj.name + \":\" + proto.name + \":\" + proto.nested.value;\n",
+            &error
+        );
+        EXPECT_FALSE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+        EXPECT_STRING_EQ(ctx, result.value.as.string, "1:child:base:1");
+        value_free(result.value);
+        eval_result_free(&result);
+    }
 
     {
         char *error = NULL;

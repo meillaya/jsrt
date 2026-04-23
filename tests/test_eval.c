@@ -118,6 +118,21 @@ void run_eval_tests(TestContext *ctx) {
     value_free(result.value);
     eval_result_free(&result);
 
+    result = evaluate_source(
+        "let proto = {name: \"base\", nested: {value: 0}};\n"
+        "let obj = {};\n"
+        "setPrototypeOf(obj, proto);\n"
+        "obj.nested.value = 1;\n"
+        "obj.name = \"child\";\n"
+        "len(obj) + \":\" + obj.name + \":\" + proto.name + \":\" + proto.nested.value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
+    EXPECT_STRING_EQ(ctx, result.value.as.string, "1:child:base:1");
+    value_free(result.value);
+    eval_result_free(&result);
+
     result = evaluate_source("let obj = {name: \"jsrt\"}; obj[\"name\"];\n", &error);
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
@@ -921,7 +936,7 @@ void run_eval_tests(TestContext *ctx) {
         EXPECT_FALSE(ctx, result.had_error);
         EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
         EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 5.0);
-        EXPECT_SIZE_EQ(ctx, gc_live_function_count(), 3U);
+        EXPECT_SIZE_EQ(ctx, gc_live_function_count(), 4U);
         EXPECT_SIZE_EQ(ctx, gc_live_env_count(), 1U);
 
         value_free(result.value);
