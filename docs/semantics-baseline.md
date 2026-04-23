@@ -77,11 +77,32 @@ Evidence:
 These are not part of the current baseline:
 
 - modules / imports / exports
-- classes / prototypes / `this` / `new`
+- prototype linkage / prototype-chain lookup / method dispatch
+- classes / `this` / `new`
 - async / event loop behavior
 - broad ECMAScript coercion compatibility
 - sparse arrays / array growth on assignment
 - assignment through arbitrary non-variable roots like `makeObj().x = 1`
+
+## Roadmap L2 update guardrail
+
+When Roadmap L2 lands, this baseline should move only the bounded prototype-chain surface into the supported set:
+
+- explicit prototype linkage via the milestone-approved builtin API
+- own-first, then prototype-chain property reads
+- method dispatch as prototype-aware lookup followed by an ordinary function call
+
+The following must stay deferred to L3 even after the L2 baseline update:
+
+- implicit `this` binding
+- `new` / constructor behavior
+- classes or class syntax
+
+L2 should also keep these object-helper rules explicit in the baseline update:
+
+- direct property writes stay receiver-only
+- inherited intermediate-container assignment mutates the resolved inherited container rather than inventing an own receiver-local container
+- `len(obj)`, object equality, and object stringification remain own-property-only
 
 ## Interpretation rule for later milestones
 
