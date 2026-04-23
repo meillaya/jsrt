@@ -43,20 +43,17 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 - [ ] `docs/semantics-baseline.md` is updated to describe the bounded L2 surface, while keeping `this` / `new` / constructors / classes deferred to L3
 - [ ] the ASan lane is re-run after the final object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
-## L3 `this` / constructor exit gates
+## L3 `this` binding / constructor exit gates
 
-Use this addendum when verifying the bounded L3 milestone.
+Use this addendum when verifying the bounded L3 milestone. L3 is done only when receiver binding and constructor semantics land **without** bleeding into L4 class syntax or general function-object semantics.
 
-- [ ] lexer/parser coverage locks in `this` / `new` tokens, explicit AST forms, and bounded unsupported-`new` diagnostics
-- [ ] bare/plain/extracted-call `this` behavior is verified as `null`
-- [ ] dot/bracket method calls bind `this` to the concrete receiver, including prototype-inherited methods
-- [ ] constructor allocation, prototype wiring, and constructor return-value rules are covered in both evaluator and VM suites
-- [ ] bounded function `prototype` reads/writes are covered, including native-function `prototype` behavior
-- [ ] non-`prototype` function property access/assignment remains rejected with runtime type diagnostics
-- [ ] bytecode/disassembly evidence captures `BC_CALL`, `BC_CALL_METHOD`, `BC_CALL_NEW`, and the hidden `this` load path
-- [ ] at least one example demonstrates constructor + prototype-method interaction
-- [ ] `docs/semantics-baseline.md` is updated to describe the landed L3 surface while keeping classes deferred to L4
-- [ ] the ASan lane is re-run after the final function/object graph changes land, and the exact command/result are captured in the completion evidence bundle
+- [ ] `this` and bounded parenthesized `new` syntax are parser-covered, including recovery/diagnostics for malformed or out-of-scope `new` forms
+- [ ] bare/top-level/plain/extracted calls keep `this = null`, while `obj.method()` and `obj["method"]()` bind `this` to the concrete receiver, including prototype-inherited methods
+- [ ] `new Ctor(args)` allocates a fresh instance, uses `Ctor.prototype` / `Ctor["prototype"]` when that slot is an object, and preserves the default instance when the constructor returns a primitive or `null`
+- [ ] non-constructable targets, native functions, invalid constructor-`prototype` writes, and non-`prototype` function property access/assignment fail with targeted runtime type diagnostics
+- [ ] evaluator and VM suites cover the same supported positive/negative cases, including evaluation-order guards and bytecode evidence for plain, method, and constructor call lowering
+- [ ] at least one example demonstrates constructor + prototype-method interaction, and the docs diff keeps L4 classes / broader function-object semantics explicitly deferred
+- [ ] the ASan lane is re-run after the final function/object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
 ## Design-heavy milestones
 

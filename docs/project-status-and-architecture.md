@@ -237,7 +237,7 @@ Achieved so far:
 - recursive-descent parser with recovery and aggregated parse errors
 - explicit AST with clear ownership rules
 - variables, assignment, functions, closures, and function expressions
-- strings, arrays, objects, and shared-reference aggregate semantics
+- strings, arrays, objects, explicit prototype-chain lookup, and shared-reference aggregate semantics
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - `const` declarations
 - built-ins `print`, `len`, and `typeOf`
@@ -295,7 +295,8 @@ The project is intentionally incomplete. That is a feature, not a flaw, because 
 
 Still outside scope today:
 - modules and multi-file execution
-- classes, prototypes, `this`, and `new`
+- receiver-bound `this`, constructor calls via `new`, and bounded function `prototype` semantics
+- classes / `super` / class desugaring
 - async/event loop semantics
 - broad ECMAScript coercion and compatibility
 - JIT or optimization passes
@@ -374,21 +375,23 @@ JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js
 
 ## 11. Next major milestones
 
-The immediate next major milestones are no longer basic language features. The codebase has reached the point where the next valuable work is about scale, architecture, and measurement.
+The immediate next major milestones now sit at the boundary between the remaining core language semantics and the broader architecture/measurement work that follows them.
 
 ### Near-next execution targets
+
+L2 prototype-chain lookup is now part of the bounded runtime surface. The next execution targets build on that base.
 
 1. **L1 — Benchmark and profiling harness**
    - Add a repeatable performance corpus and measurement harness.
    - Establish baseline numbers before optimization or architecture expansion.
 
-2. **L4 — Class syntax and desugaring/direct support**
-   - Layer a bounded class surface over the landed L3 constructor/prototype runtime.
-   - Keep the class design explicitly downstream of the current constructor semantics.
+2. **L3 — `this` binding and constructor semantics**
+   - Define receiver binding, parenthesized `new`, and bounded constructor/prototype behavior on top of the landed L2 prototype model.
+   - Keep native functions non-constructable and defer classes / broader function-object semantics to later milestones.
 
-3. **L5 — Module system**
-   - Introduce import/export boundaries once the current single-file execution surface is no longer the limiting factor.
-   - Preserve the current diagnostics and verification discipline as the surface broadens.
+3. **L4 — class syntax and desugaring/direct support**
+   - Layer class syntax only after L3 locks the constructor/prototype runtime model.
+   - Reuse the bounded L3 constructor surface instead of inventing a parallel OO mechanism.
 
 ### Larger long-horizon targets
 

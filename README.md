@@ -9,7 +9,7 @@ A small JavaScript-like runtime in C with a hand-written lexer, recursive-descen
 - variables, `const`, assignment, and blocks
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - functions, closures, and function expressions
-- arrays and objects with shared-reference mutation semantics
+- arrays and objects with shared-reference mutation semantics plus explicit prototype linkage / prototype-chain lookup
 - built-ins: `print`, `len`, `typeOf`
 - source-based diagnostics with caret markers
 - an opt-in VM backend via `JSRT_BACKEND=vm`
