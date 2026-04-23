@@ -387,8 +387,8 @@ The immediate next major milestones are no longer basic language features. The c
    - This is the first major step from “object literals” toward a richer JavaScript object model.
 
 3. **L3 — `this` binding and constructor semantics**
-   - Define method invocation context and object construction rules.
-   - This milestone becomes meaningful only after prototype/method dispatch exists.
+   - Define method invocation context and object construction rules on top of the L2 prototype lookup model.
+   - Keep the surface bounded to `this`, `new`, constructors, and the narrow function `prototype` slot; classes remain L4 work.
 
 ### Larger long-horizon targets
 
@@ -440,4 +440,3 @@ The following resources are the most useful starting set for building a project 
 
 - **The official Lua reference manuals** — not because `jsrt` is Lua-like in syntax, but because the Lua manuals show how to describe a compact dynamic language and runtime surface precisely.  
   https://www.lua.org/manual/
-

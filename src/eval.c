@@ -38,6 +38,7 @@ typedef struct {
 
 typedef struct {
     const char *root_name;
+    bool root_is_this;
     AssignStep *items;
     size_t count;
     size_t capacity;
@@ -155,6 +156,15 @@ static bool ensure_number(Evaluator *evaluator, Value value, const Expr *expr, c
 static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr);
 static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt);
 
+static JsObject *create_empty_object(void) {
+    JsObject *object = jsrt_malloc(sizeof(*object));
+    gc_register_object(&object->gc, GC_OBJECT_OBJECT);
+    object->items = NULL;
+    object->count = 0U;
+    object->prototype = NULL;
+    return object;
+}
+
 static JsFunction *create_user_function(const Stmt *declaration, const Expr *expression, Env *closure) {
     JsFunction *function = jsrt_malloc(sizeof(*function));
     gc_register_object(&function->gc, GC_OBJECT_FUNCTION);
@@ -167,6 +177,7 @@ static JsFunction *create_user_function(const Stmt *declaration, const Expr *exp
     function->bytecode = NULL;
     function->captures = NULL;
     function->capture_count = 0U;
+    function->prototype_object = create_empty_object();
     return function;
 }
 
@@ -182,6 +193,7 @@ static JsFunction *create_native_function(const char *name, size_t arity, Builti
     function->bytecode = NULL;
     function->captures = NULL;
     function->capture_count = 0U;
+    function->prototype_object = NULL;
     return function;
 }
 
@@ -420,6 +432,7 @@ static EvalResult execute_switch(Evaluator *evaluator, const Stmt *stmt) {
 
 static void assign_path_init(AssignPath *path) {
     path->root_name = NULL;
+    path->root_is_this = false;
     path->items = NULL;
     path->count = 0;
     path->capacity = 0;
@@ -447,6 +460,9 @@ static bool build_assign_path(const Expr *expr, AssignPath *path) {
     switch (expr->kind) {
         case EXPR_IDENTIFIER:
             path->root_name = expr->as.identifier.name;
+            return true;
+        case EXPR_THIS:
+            path->root_is_this = true;
             return true;
         case EXPR_PROPERTY:
             if (!build_assign_path(expr->as.property.target, path)) {
@@ -522,11 +538,211 @@ static bool object_lookup_key(JsObject *object, const char *key, JsObject **owne
     return false;
 }
 
+static bool is_function_prototype_property(const char *key) {
+    return strcmp(key, "prototype") == 0;
+}
+
+static EvalResult function_property_error(Evaluator *evaluator, int line, int column) {
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        line,
+        column,
+        1,
+        "function properties are limited to 'prototype' in L3"
+    );
+}
+
+static EvalResult read_function_property(Evaluator *evaluator, int line, int column, const JsFunction *function, const char *key) {
+    if (!is_function_prototype_property(key)) {
+        return function_property_error(evaluator, line, column);
+    }
+    if (function->prototype_object == NULL) {
+        return result_ok(value_null());
+    }
+    return result_ok(value_object_take(function->prototype_object));
+}
+
+static EvalResult read_value_property_by_name(
+    Evaluator *evaluator,
+    int line,
+    int column,
+    Value target_value,
+    const char *property_name
+) {
+    ptrdiff_t key_index;
+    JsObject *owner;
+
+    if (target_value.type == VALUE_OBJECT) {
+        if (object_lookup_key(target_value.as.object, property_name, &owner, &key_index)) {
+            Value result = value_clone(owner->items[(size_t)key_index].value);
+            value_free(target_value);
+            return result_ok(result);
+        }
+        value_free(target_value);
+        return result_runtime_error_at_take(
+            evaluator,
+            RUNTIME_ERROR_LOOKUP,
+            line,
+            column,
+            1,
+            jsrt_format("object key '%s' not found", property_name)
+        );
+    }
+
+    if (target_value.type == VALUE_FUNCTION && target_value.as.function != NULL) {
+        EvalResult result = read_function_property(evaluator, line, column, target_value.as.function, property_name);
+        value_free(target_value);
+        return result;
+    }
+
+    value_free(target_value);
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        line,
+        column,
+        1,
+        "property access requires an object value"
+    );
+}
+
+static EvalResult read_value_index(Evaluator *evaluator, const Expr *expr, Value target_value, Value index_value) {
+    size_t i;
+
+    if (target_value.type == VALUE_ARRAY) {
+        if (index_value.type != VALUE_NUMBER) {
+            value_free(target_value);
+            value_free(index_value);
+            return result_runtime_error_at(
+                evaluator,
+                RUNTIME_ERROR_TYPE,
+                expr->line,
+                expr->column,
+                1,
+                "array indexing expects a numeric index"
+            );
+        }
+        i = (size_t)index_value.as.number;
+        if ((double)i != index_value.as.number || i >= target_value.as.array->count) {
+            value_free(target_value);
+            value_free(index_value);
+            return result_runtime_error_at(evaluator, RUNTIME_ERROR_INDEX, expr->line, expr->column, 1, "array index out of bounds");
+        }
+        {
+            Value result = value_clone(target_value.as.array->items[i]);
+            value_free(target_value);
+            value_free(index_value);
+            return result_ok(result);
+        }
+    }
+
+    if (target_value.type == VALUE_OBJECT) {
+        ptrdiff_t key_index;
+        JsObject *owner;
+        if (index_value.type != VALUE_STRING) {
+            value_free(target_value);
+            value_free(index_value);
+            return result_runtime_error_at(
+                evaluator,
+                RUNTIME_ERROR_TYPE,
+                expr->line,
+                expr->column,
+                1,
+                "object indexing expects a string key"
+            );
+        }
+        if (object_lookup_key(target_value.as.object, index_value.as.string, &owner, &key_index)) {
+            Value result = value_clone(owner->items[(size_t)key_index].value);
+            value_free(target_value);
+            value_free(index_value);
+            return result_ok(result);
+        }
+        {
+            char *message = jsrt_format("object key '%s' not found", index_value.as.string);
+            value_free(target_value);
+            value_free(index_value);
+            return result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_LOOKUP,
+                expr->line,
+                expr->column,
+                1,
+                message
+            );
+        }
+    }
+
+    if (target_value.type == VALUE_FUNCTION && target_value.as.function != NULL) {
+        EvalResult result;
+        if (index_value.type != VALUE_STRING) {
+            value_free(target_value);
+            value_free(index_value);
+            return function_property_error(evaluator, expr->line, expr->column);
+        }
+        result = read_function_property(evaluator, expr->line, expr->column, target_value.as.function, index_value.as.string);
+        value_free(target_value);
+        value_free(index_value);
+        return result;
+    }
+
+    value_free(target_value);
+    value_free(index_value);
+    return result_runtime_error_at(
+        evaluator,
+        RUNTIME_ERROR_TYPE,
+        expr->line,
+        expr->column,
+        1,
+        "indexing requires an array or object value"
+    );
+}
+
+static EvalResult assign_function_property(
+    Evaluator *evaluator,
+    int line,
+    int column,
+    JsFunction *function,
+    const char *key,
+    Value assigned_value
+) {
+    if (!is_function_prototype_property(key)) {
+        return function_property_error(evaluator, line, column);
+    }
+    if (function->is_native) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            line,
+            column,
+            1,
+            "native functions are not constructors"
+        );
+    }
+    if (assigned_value.type != VALUE_NULL &&
+        (assigned_value.type != VALUE_OBJECT || assigned_value.as.object == NULL)) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            line,
+            column,
+            1,
+            "function prototype must be an object or null"
+        );
+    }
+    function->prototype_object = assigned_value.type == VALUE_OBJECT ? assigned_value.as.object : NULL;
+    return result_ok(value_null());
+}
+
 static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, const AssignPath *path, Value assigned_value) {
     GcTempRoot root_value_root;
     GcTempRoot assigned_value_root;
+    GcTempRoot temp_root;
+    Value temp_value = value_null();
+    bool has_temp_value = false;
     size_t i;
     Value *current = root_value;
+    EvalResult result = result_ok(value_null());
 
     gc_temp_root_push_value(&root_value_root, root_value);
     gc_temp_root_push_value(&assigned_value_root, &assigned_value);
@@ -539,10 +755,43 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
             ptrdiff_t key_index;
             JsObject *owner;
 
+            if (current->type == VALUE_FUNCTION && current->as.function != NULL) {
+                if (is_last) {
+                    result = assign_function_property(
+                        evaluator,
+                        step->line,
+                        step->column,
+                        current->as.function,
+                        step->property_name,
+                        assigned_value
+                    );
+                    goto cleanup;
+                }
+
+                result = read_function_property(
+                    evaluator,
+                    step->line,
+                    step->column,
+                    current->as.function,
+                    step->property_name
+                );
+                if (result.had_error) {
+                    goto cleanup;
+                }
+                if (has_temp_value) {
+                    gc_temp_root_pop(&temp_root);
+                    value_free(temp_value);
+                }
+                temp_value = result.value;
+                result.value = value_null();
+                gc_temp_root_push_value(&temp_root, &temp_value);
+                has_temp_value = true;
+                current = &temp_value;
+                continue;
+            }
+
             if (current->type != VALUE_OBJECT) {
-                gc_temp_root_pop(&assigned_value_root);
-                gc_temp_root_pop(&root_value_root);
-                return result_runtime_error_at(
+                result = result_runtime_error_at(
                     evaluator,
                     RUNTIME_ERROR_TYPE,
                     step->line,
@@ -550,18 +799,16 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     1,
                     "property assignment requires an object value"
                 );
+                goto cleanup;
             }
 
             if (is_last) {
                 object_set_key(current->as.object, step->property_name, assigned_value);
-                gc_temp_root_pop(&assigned_value_root);
-                gc_temp_root_pop(&root_value_root);
-                return result_ok(value_null());
+                result = result_ok(value_null());
+                goto cleanup;
             }
             if (!object_lookup_key(current->as.object, step->property_name, &owner, &key_index)) {
-                gc_temp_root_pop(&assigned_value_root);
-                gc_temp_root_pop(&root_value_root);
-                return result_runtime_error_at_take(
+                result = result_runtime_error_at_take(
                     evaluator,
                     RUNTIME_ERROR_LOOKUP,
                     step->line,
@@ -569,6 +816,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                     1,
                     jsrt_format("object key '%s' not found", step->property_name)
                 );
+                goto cleanup;
             }
             current = &owner->items[(size_t)key_index].value;
             continue;
@@ -577,18 +825,15 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
         {
             EvalResult index_result = eval_expression(evaluator, step->index_expr);
             if (index_result.had_error) {
-                gc_temp_root_pop(&assigned_value_root);
-                gc_temp_root_pop(&root_value_root);
-                return index_result;
+                result = index_result;
+                goto cleanup;
             }
 
             if (current->type == VALUE_ARRAY) {
                 size_t index;
                 if (index_result.value.type != VALUE_NUMBER) {
                     value_free(index_result.value);
-                    gc_temp_root_pop(&assigned_value_root);
-                    gc_temp_root_pop(&root_value_root);
-                    return result_runtime_error_at(
+                    result = result_runtime_error_at(
                         evaluator,
                         RUNTIME_ERROR_TYPE,
                         step->line,
@@ -596,13 +841,12 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                         1,
                         "array assignment expects a numeric index"
                     );
+                    goto cleanup;
                 }
                 index = (size_t)index_result.value.as.number;
                 if ((double)index != index_result.value.as.number || index >= current->as.array->count) {
                     value_free(index_result.value);
-                    gc_temp_root_pop(&assigned_value_root);
-                    gc_temp_root_pop(&root_value_root);
-                    return result_runtime_error_at(
+                    result = result_runtime_error_at(
                         evaluator,
                         RUNTIME_ERROR_INDEX,
                         step->line,
@@ -610,16 +854,58 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                         1,
                         "array assignment index out of bounds"
                     );
+                    goto cleanup;
                 }
                 value_free(index_result.value);
                 if (is_last) {
                     value_free(current->as.array->items[index]);
                     current->as.array->items[index] = value_clone(assigned_value);
-                    gc_temp_root_pop(&assigned_value_root);
-                    gc_temp_root_pop(&root_value_root);
-                    return result_ok(value_null());
+                    result = result_ok(value_null());
+                    goto cleanup;
                 }
                 current = &current->as.array->items[index];
+                continue;
+            }
+
+            if (current->type == VALUE_FUNCTION && current->as.function != NULL) {
+                if (index_result.value.type != VALUE_STRING) {
+                    value_free(index_result.value);
+                    result = function_property_error(evaluator, step->line, step->column);
+                    goto cleanup;
+                }
+                if (is_last) {
+                    result = assign_function_property(
+                        evaluator,
+                        step->line,
+                        step->column,
+                        current->as.function,
+                        index_result.value.as.string,
+                        assigned_value
+                    );
+                    value_free(index_result.value);
+                    goto cleanup;
+                }
+
+                result = read_function_property(
+                    evaluator,
+                    step->line,
+                    step->column,
+                    current->as.function,
+                    index_result.value.as.string
+                );
+                value_free(index_result.value);
+                if (result.had_error) {
+                    goto cleanup;
+                }
+                if (has_temp_value) {
+                    gc_temp_root_pop(&temp_root);
+                    value_free(temp_value);
+                }
+                temp_value = result.value;
+                result.value = value_null();
+                gc_temp_root_push_value(&temp_root, &temp_value);
+                has_temp_value = true;
+                current = &temp_value;
                 continue;
             }
 
@@ -628,9 +914,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                 JsObject *owner;
                 if (index_result.value.type != VALUE_STRING) {
                     value_free(index_result.value);
-                    gc_temp_root_pop(&assigned_value_root);
-                    gc_temp_root_pop(&root_value_root);
-                    return result_runtime_error_at(
+                    result = result_runtime_error_at(
                         evaluator,
                         RUNTIME_ERROR_TYPE,
                         step->line,
@@ -638,21 +922,26 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                         1,
                         "object assignment expects a string key"
                     );
+                    goto cleanup;
                 }
                 key_index = object_find_key(current->as.object, index_result.value.as.string);
                 if (is_last) {
                     object_set_key(current->as.object, index_result.value.as.string, assigned_value);
                     value_free(index_result.value);
-                    gc_temp_root_pop(&assigned_value_root);
-                    gc_temp_root_pop(&root_value_root);
-                    return result_ok(value_null());
+                    result = result_ok(value_null());
+                    goto cleanup;
                 }
                 if (!object_lookup_key(current->as.object, index_result.value.as.string, &owner, &key_index)) {
-                    char *message = jsrt_format("object key '%s' not found", index_result.value.as.string);
+                    result = result_runtime_error_at_take(
+                        evaluator,
+                        RUNTIME_ERROR_LOOKUP,
+                        step->line,
+                        step->column,
+                        1,
+                        jsrt_format("object key '%s' not found", index_result.value.as.string)
+                    );
                     value_free(index_result.value);
-                    gc_temp_root_pop(&assigned_value_root);
-                    gc_temp_root_pop(&root_value_root);
-                    return result_runtime_error_at_take(evaluator, RUNTIME_ERROR_LOOKUP, step->line, step->column, 1, message);
+                    goto cleanup;
                 }
                 value_free(index_result.value);
                 current = &owner->items[(size_t)key_index].value;
@@ -660,9 +949,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
             }
 
             value_free(index_result.value);
-            gc_temp_root_pop(&assigned_value_root);
-            gc_temp_root_pop(&root_value_root);
-            return result_runtime_error_at(
+            result = result_runtime_error_at(
                 evaluator,
                 RUNTIME_ERROR_TYPE,
                 step->line,
@@ -670,12 +957,20 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
                 1,
                 "index assignment requires an array or object value"
             );
+            goto cleanup;
         }
     }
 
+    result = result_runtime_error_at(evaluator, RUNTIME_ERROR_ASSIGNMENT, 1, 1, 1, "invalid assignment path");
+
+cleanup:
+    if (has_temp_value) {
+        gc_temp_root_pop(&temp_root);
+        value_free(temp_value);
+    }
     gc_temp_root_pop(&assigned_value_root);
     gc_temp_root_pop(&root_value_root);
-    return result_runtime_error_at(evaluator, RUNTIME_ERROR_ASSIGNMENT, 1, 1, 1, "invalid assignment path");
+    return result;
 }
 
 static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
@@ -722,7 +1017,8 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
         GcTempRoot target_root;
 
         assign_path_init(&path);
-        if (!build_assign_path(expr->as.assign.target, &path) || path.root_name == NULL) {
+        if (!build_assign_path(expr->as.assign.target, &path) ||
+            (path.root_name == NULL && !path.root_is_this)) {
             assign_path_free(&path);
             value_free(value_result.value);
             return result_runtime_error_at(
@@ -731,10 +1027,14 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
                 expr->line,
                 expr->column,
                 1,
-                "assignment target must start with a variable"
+                "assignment target must start with a variable or this"
             );
         }
-        if (!env_get(evaluator->env, path.root_name, &root_value)) {
+        if (path.root_is_this) {
+            if (!env_get(evaluator->env, "this", &root_value)) {
+                root_value = value_null();
+            }
+        } else if (!env_get(evaluator->env, path.root_name, &root_value)) {
             assign_path_free(&path);
             value_free(value_result.value);
             return result_runtime_error_at_take(
@@ -759,34 +1059,8 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
             return assign_result;
         }
         eval_result_free(&assign_result);
-
-        {
-            EnvAssignResult assign_root = env_assign(evaluator->env, path.root_name, root_value);
-            if (assign_root == ENV_ASSIGN_OK) {
-                value_free(root_value);
-                return value_result;
-            }
-            value_free(root_value);
-            value_free(value_result.value);
-            if (assign_root == ENV_ASSIGN_CONST) {
-                return result_runtime_error_at_take(
-                    evaluator,
-                    RUNTIME_ERROR_ASSIGNMENT,
-                    expr->as.assign.target->line,
-                    expr->as.assign.target->column,
-                    (int)strlen(path.root_name),
-                    jsrt_format("cannot assign to const variable '%s'", path.root_name)
-                );
-            }
-            return result_runtime_error_at_take(
-                evaluator,
-                RUNTIME_ERROR_NAME,
-                expr->as.assign.target->line,
-                expr->as.assign.target->column,
-                (int)strlen(path.root_name),
-                jsrt_format("undefined variable '%s'", path.root_name)
-            );
-        }
+        value_free(root_value);
+        return value_result;
     }
 }
 
@@ -842,67 +1116,27 @@ static EvalResult execute_block(Evaluator *evaluator, const StmtArray *statement
     return result;
 }
 
-static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
-    EvalResult callee_result = eval_expression(evaluator, expr->as.call.callee);
+static bool value_is_object_like(Value value) {
+    return value.type == VALUE_OBJECT || value.type == VALUE_ARRAY || value.type == VALUE_FUNCTION;
+}
+
+static bool evaluate_call_arguments(
+    Evaluator *evaluator,
+    const ExprArray *argument_exprs,
+    Value **out_arguments,
+    GcTempRoot **out_argument_roots,
+    EvalResult *out_error
+) {
     size_t i;
-    Value *arguments;
+    Value *arguments = jsrt_malloc(sizeof(*arguments) * argument_exprs->count);
     GcTempRoot *argument_roots = NULL;
-    GcTempRoot callee_root;
-    EvalResult result;
-    const StringArray *params;
-    const StmtArray *body;
-    const char *function_name;
-    Env *call_env;
-    const JsFunction *function;
 
-    if (callee_result.had_error) {
-        return callee_result;
-    }
-    if (callee_result.value.type != VALUE_FUNCTION || callee_result.value.as.function == NULL) {
-        value_free(callee_result.value);
-        return result_runtime_error_at(
-            evaluator,
-            RUNTIME_ERROR_TYPE,
-            expr->line,
-            expr->column,
-            1,
-            "attempted to call a non-function value"
-        );
+    if (argument_exprs->count > 0U) {
+        argument_roots = jsrt_malloc(sizeof(*argument_roots) * argument_exprs->count);
     }
 
-    function = callee_result.value.as.function;
-    params = js_function_params(function);
-    body = js_function_body(function);
-    function_name = js_function_name(function);
-    if (!function->is_native && (params == NULL || body == NULL)) {
-        value_free(callee_result.value);
-        return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "invalid function body");
-    }
-
-    if ((!function->is_native && expr->as.call.arguments.count != params->count) ||
-        (function->is_native && expr->as.call.arguments.count != function->native_arity)) {
-        value_free(callee_result.value);
-        return result_runtime_error_at_take(
-            evaluator,
-            RUNTIME_ERROR_ARITY,
-            expr->line,
-            expr->column,
-            1,
-            jsrt_format(
-                "expected %zu arguments but got %zu",
-                function->is_native ? function->native_arity : params->count,
-                expr->as.call.arguments.count
-            )
-        );
-    }
-
-    arguments = jsrt_malloc(sizeof(*arguments) * expr->as.call.arguments.count);
-    if (expr->as.call.arguments.count > 0) {
-        argument_roots = jsrt_malloc(sizeof(*argument_roots) * expr->as.call.arguments.count);
-    }
-    gc_temp_root_push_value(&callee_root, &callee_result.value);
-    for (i = 0; i < expr->as.call.arguments.count; ++i) {
-        EvalResult arg_result = eval_expression(evaluator, expr->as.call.arguments.items[i]);
+    for (i = 0; i < argument_exprs->count; ++i) {
+        EvalResult arg_result = eval_expression(evaluator, argument_exprs->items[i]);
         if (arg_result.had_error) {
             size_t j;
             for (j = i; j > 0; --j) {
@@ -911,40 +1145,118 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
             }
             free(argument_roots);
             free(arguments);
-            gc_temp_root_pop(&callee_root);
-            value_free(callee_result.value);
-            return arg_result;
+            *out_error = arg_result;
+            return false;
         }
         arguments[i] = arg_result.value;
         gc_temp_root_push_value(&argument_roots[i], &arguments[i]);
     }
 
-    if (function->is_native) {
-        result = call_native_function(evaluator, expr, function, arguments);
-        for (i = expr->as.call.arguments.count; i > 0; --i) {
-            gc_temp_root_pop(&argument_roots[i - 1U]);
-            value_free(arguments[i - 1U]);
-        }
-        free(argument_roots);
-        free(arguments);
-        gc_temp_root_pop(&callee_root);
-        value_free(callee_result.value);
-        return result;
-    }
+    *out_arguments = arguments;
+    *out_argument_roots = argument_roots;
+    return true;
+}
 
-    call_env = env_create(function->closure);
-    if (function_name != NULL) {
-        env_define(call_env, function_name, callee_result.value, true);
-    }
-    for (i = 0; i < params->count; ++i) {
-        env_define(call_env, params->items[i], arguments[i], false);
-    }
-    for (i = expr->as.call.arguments.count; i > 0; --i) {
+static void free_call_arguments(Value *arguments, GcTempRoot *argument_roots, size_t count) {
+    size_t i;
+
+    for (i = count; i > 0; --i) {
         gc_temp_root_pop(&argument_roots[i - 1U]);
         value_free(arguments[i - 1U]);
     }
     free(argument_roots);
     free(arguments);
+}
+
+static EvalResult invoke_function(
+    Evaluator *evaluator,
+    const Expr *expr,
+    Value callee_value,
+    Value this_value,
+    Value *arguments,
+    size_t argument_count,
+    bool is_constructor,
+    Value constructor_instance
+) {
+    GcTempRoot callee_root;
+    GcTempRoot this_root;
+    GcTempRoot constructor_root;
+    const JsFunction *function;
+    const StringArray *params;
+    const StmtArray *body;
+    const char *function_name;
+    Env *call_env;
+    EvalResult result;
+    size_t i;
+
+    gc_temp_root_push_value(&callee_root, &callee_value);
+    gc_temp_root_push_value(&this_root, &this_value);
+    gc_temp_root_push_value(&constructor_root, &constructor_instance);
+
+    if (callee_value.type != VALUE_FUNCTION || callee_value.as.function == NULL) {
+        result = result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            expr->line,
+            expr->column,
+            1,
+            is_constructor ? "new expects a constructor function" : "attempted to call a non-function value"
+        );
+        goto cleanup;
+    }
+
+    function = callee_value.as.function;
+    params = js_function_params(function);
+    body = js_function_body(function);
+    function_name = js_function_name(function);
+
+    if (is_constructor && function->is_native) {
+        result = result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            expr->line,
+            expr->column,
+            1,
+            "native functions are not constructors"
+        );
+        goto cleanup;
+    }
+
+    if (!function->is_native && (params == NULL || body == NULL)) {
+        result = result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "invalid function body");
+        goto cleanup;
+    }
+
+    if ((!function->is_native && argument_count != params->count) ||
+        (function->is_native && argument_count != function->native_arity)) {
+        result = result_runtime_error_at_take(
+            evaluator,
+            RUNTIME_ERROR_ARITY,
+            expr->line,
+            expr->column,
+            1,
+            jsrt_format(
+                "expected %zu arguments but got %zu",
+                function->is_native ? function->native_arity : params->count,
+                argument_count
+            )
+        );
+        goto cleanup;
+    }
+
+    if (function->is_native) {
+        result = call_native_function(evaluator, expr, function, arguments);
+        goto cleanup;
+    }
+
+    call_env = env_create(function->closure);
+    if (function_name != NULL) {
+        env_define(call_env, function_name, callee_value, true);
+    }
+    env_define(call_env, "this", this_value, true);
+    for (i = 0; i < params->count; ++i) {
+        env_define(call_env, params->items[i], arguments[i], false);
+    }
 
     {
         int previous_loop_depth = evaluator->loop_depth;
@@ -957,18 +1269,169 @@ static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
     }
     env_destroy(call_env);
     collect_garbage(evaluator, result.had_error ? NULL : &result.value);
-    gc_temp_root_pop(&callee_root);
-    value_free(callee_result.value);
 
     if (result.had_error) {
-        return result;
+        goto cleanup;
     }
+
     if (result.is_return) {
         result.is_return = false;
+        if (is_constructor && !value_is_object_like(result.value)) {
+            value_free(result.value);
+            result.value = value_clone(constructor_instance);
+        }
+        goto cleanup;
+    }
+
+    value_free(result.value);
+    result = result_ok(is_constructor ? value_clone(constructor_instance) : value_null());
+
+cleanup:
+    gc_temp_root_pop(&constructor_root);
+    gc_temp_root_pop(&this_root);
+    gc_temp_root_pop(&callee_root);
+    return result;
+}
+
+static EvalResult eval_call(Evaluator *evaluator, const Expr *expr) {
+    EvalResult callee_result;
+    Value receiver_value = value_null();
+    Value *arguments;
+    GcTempRoot *argument_roots = NULL;
+    EvalResult result;
+
+    if (expr->as.call.callee->kind == EXPR_PROPERTY) {
+        const Expr *callee = expr->as.call.callee;
+        EvalResult target_result = eval_expression(evaluator, callee->as.property.target);
+        if (target_result.had_error) {
+            return target_result;
+        }
+        receiver_value = value_clone(target_result.value);
+        callee_result = read_value_property_by_name(
+            evaluator,
+            callee->line,
+            callee->column,
+            target_result.value,
+            callee->as.property.name
+        );
+    } else if (expr->as.call.callee->kind == EXPR_INDEX) {
+        const Expr *callee = expr->as.call.callee;
+        EvalResult target_result = eval_expression(evaluator, callee->as.index.target);
+        EvalResult index_result;
+        GcTempRoot target_root;
+
+        if (target_result.had_error) {
+            return target_result;
+        }
+        gc_temp_root_push_value(&target_root, &target_result.value);
+        index_result = eval_expression(evaluator, callee->as.index.index);
+        gc_temp_root_pop(&target_root);
+        if (index_result.had_error) {
+            value_free(target_result.value);
+            return index_result;
+        }
+        receiver_value = value_clone(target_result.value);
+        callee_result = read_value_index(evaluator, callee, target_result.value, index_result.value);
+    } else {
+        callee_result = eval_expression(evaluator, expr->as.call.callee);
+    }
+
+    if (callee_result.had_error) {
+        value_free(receiver_value);
+        return callee_result;
+    }
+    if (!evaluate_call_arguments(
+            evaluator,
+            &expr->as.call.arguments,
+            &arguments,
+            &argument_roots,
+            &result)) {
+        value_free(callee_result.value);
+        value_free(receiver_value);
         return result;
     }
-    value_free(result.value);
-    return result_ok(value_null());
+
+    result = invoke_function(
+        evaluator,
+        expr,
+        callee_result.value,
+        receiver_value,
+        arguments,
+        expr->as.call.arguments.count,
+        false,
+        value_null()
+    );
+    free_call_arguments(arguments, argument_roots, expr->as.call.arguments.count);
+    value_free(callee_result.value);
+    value_free(receiver_value);
+    return result;
+}
+
+static EvalResult eval_new(Evaluator *evaluator, const Expr *expr) {
+    EvalResult callee_result = eval_expression(evaluator, expr->as.new_expr.callee);
+    Value *arguments;
+    GcTempRoot *argument_roots = NULL;
+    EvalResult result;
+    Value instance_value;
+    JsObject *instance;
+    JsObject *prototype = NULL;
+
+    if (callee_result.had_error) {
+        return callee_result;
+    }
+    if (!evaluate_call_arguments(
+            evaluator,
+            &expr->as.new_expr.arguments,
+            &arguments,
+            &argument_roots,
+            &result)) {
+        value_free(callee_result.value);
+        return result;
+    }
+
+    if (callee_result.value.type != VALUE_FUNCTION || callee_result.value.as.function == NULL) {
+        free_call_arguments(arguments, argument_roots, expr->as.new_expr.arguments.count);
+        value_free(callee_result.value);
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            expr->line,
+            expr->column,
+            1,
+            "new expects a constructor function"
+        );
+    }
+    if (callee_result.value.as.function->is_native) {
+        free_call_arguments(arguments, argument_roots, expr->as.new_expr.arguments.count);
+        value_free(callee_result.value);
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_TYPE,
+            expr->line,
+            expr->column,
+            1,
+            "native functions are not constructors"
+        );
+    }
+
+    prototype = callee_result.value.as.function->prototype_object;
+    instance = create_empty_object();
+    instance->prototype = prototype;
+    instance_value = value_object_take(instance);
+
+    result = invoke_function(
+        evaluator,
+        expr,
+        callee_result.value,
+        instance_value,
+        arguments,
+        expr->as.new_expr.arguments.count,
+        true,
+        instance_value
+    );
+    free_call_arguments(arguments, argument_roots, expr->as.new_expr.arguments.count);
+    value_free(callee_result.value);
+    return result;
 }
 
 static EvalResult eval_binary_plus(Value left_value, Value right_value) {
@@ -1080,7 +1543,6 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
     EvalResult target = eval_expression(evaluator, expr->as.index.target);
     EvalResult index;
     GcTempRoot target_root;
-    size_t i;
 
     if (target.had_error) {
         return target;
@@ -1092,114 +1554,15 @@ static EvalResult eval_index(Evaluator *evaluator, const Expr *expr) {
         value_free(target.value);
         return index;
     }
-
-    if (target.value.type == VALUE_ARRAY) {
-        if (index.value.type != VALUE_NUMBER) {
-            value_free(target.value);
-            value_free(index.value);
-            return result_runtime_error_at(
-                evaluator,
-                RUNTIME_ERROR_TYPE,
-                expr->line,
-                expr->column,
-                1,
-                "array indexing expects a numeric index"
-            );
-        }
-        i = (size_t)index.value.as.number;
-        if ((double)i != index.value.as.number || i >= target.value.as.array->count) {
-            value_free(target.value);
-            value_free(index.value);
-            return result_runtime_error_at(evaluator, RUNTIME_ERROR_INDEX, expr->line, expr->column, 1, "array index out of bounds");
-        }
-        {
-            Value result = value_clone(target.value.as.array->items[i]);
-            value_free(target.value);
-            value_free(index.value);
-            return result_ok(result);
-        }
-    }
-
-    if (target.value.type == VALUE_OBJECT) {
-        ptrdiff_t key_index;
-        JsObject *owner;
-        if (index.value.type != VALUE_STRING) {
-            value_free(target.value);
-            value_free(index.value);
-            return result_runtime_error_at(
-                evaluator,
-                RUNTIME_ERROR_TYPE,
-                expr->line,
-                expr->column,
-                1,
-                "object indexing expects a string key"
-            );
-        }
-        if (object_lookup_key(target.value.as.object, index.value.as.string, &owner, &key_index)) {
-            Value result = value_clone(owner->items[(size_t)key_index].value);
-            value_free(target.value);
-            value_free(index.value);
-            return result_ok(result);
-        }
-        {
-            char *message = jsrt_format("object key '%s' not found", index.value.as.string);
-            value_free(target.value);
-            value_free(index.value);
-            return result_runtime_error_at_take(
-                evaluator,
-                RUNTIME_ERROR_LOOKUP,
-                expr->line,
-                expr->column,
-                1,
-                message
-            );
-        }
-    }
-
-    value_free(target.value);
-    value_free(index.value);
-    return result_runtime_error_at(
-        evaluator,
-        RUNTIME_ERROR_TYPE,
-        expr->line,
-        expr->column,
-        1,
-        "indexing requires an array or object value"
-    );
+    return read_value_index(evaluator, expr, target.value, index.value);
 }
 
 static EvalResult eval_property(Evaluator *evaluator, const Expr *expr) {
     EvalResult target = eval_expression(evaluator, expr->as.property.target);
-    ptrdiff_t key_index;
-    JsObject *owner;
     if (target.had_error) {
         return target;
     }
-    if (target.value.type != VALUE_OBJECT) {
-        value_free(target.value);
-        return result_runtime_error_at(
-            evaluator,
-            RUNTIME_ERROR_TYPE,
-            expr->line,
-            expr->column,
-            1,
-            "property access requires an object value"
-        );
-    }
-    if (object_lookup_key(target.value.as.object, expr->as.property.name, &owner, &key_index)) {
-        Value result = value_clone(owner->items[(size_t)key_index].value);
-        value_free(target.value);
-        return result_ok(result);
-    }
-    value_free(target.value);
-    return result_runtime_error_at_take(
-        evaluator,
-        RUNTIME_ERROR_LOOKUP,
-        expr->line,
-        expr->column,
-        1,
-        jsrt_format("object key '%s' not found", expr->as.property.name)
-    );
+    return read_value_property_by_name(evaluator, expr->line, expr->column, target.value, expr->as.property.name);
 }
 
 static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
@@ -1229,6 +1592,13 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
                 );
             }
             return result_ok(value);
+        }
+        case EXPR_THIS: {
+            Value value;
+            if (env_get(evaluator->env, "this", &value)) {
+                return result_ok(value);
+            }
+            return result_ok(value_null());
         }
         case EXPR_ASSIGN: {
             return eval_assignment(evaluator, expr);
@@ -1377,6 +1747,8 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
             return eval_index(evaluator, expr);
         case EXPR_PROPERTY:
             return eval_property(evaluator, expr);
+        case EXPR_NEW:
+            return eval_new(evaluator, expr);
     }
     return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported expression kind");
 }

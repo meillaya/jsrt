@@ -152,6 +152,28 @@ void run_diagnostics_tests(TestContext *ctx) {
     );
     free(error);
 
+    error = parse_error_for("new Ctor;");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:9: expected '(' after constructor target in 'new' expression\n"
+        "new Ctor;\n"
+        "        ^"
+    );
+    free(error);
+
+    error = parse_error_for("new factory()(1);");
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_STRING_EQ(
+        ctx,
+        error,
+        "Parser error at 1:14: calling the result of 'new' is not supported in L3\n"
+        "new factory()(1);\n"
+        "             ^"
+    );
+    free(error);
+
     {
         EvalResult result = eval_result_for("let arr = [1];\narr[3];\n");
         EXPECT_TRUE(ctx, result.had_error);
@@ -208,6 +230,20 @@ void run_diagnostics_tests(TestContext *ctx) {
             "Runtime error [arity] at 1:6: expected 1 arguments but got 0\n"
             "print();\n"
             "     ^"
+        );
+        eval_result_free(&result);
+    }
+
+    {
+        EvalResult result = eval_result_for("let ctor = 1;\nnew ctor(2);\n");
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_TYPE);
+        EXPECT_STRING_EQ(
+            ctx,
+            result.error_message,
+            "Runtime error [type] at 2:1: new expects a constructor function\n"
+            "new ctor(2);\n"
+            "^"
         );
         eval_result_free(&result);
     }

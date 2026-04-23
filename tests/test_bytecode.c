@@ -209,4 +209,26 @@ void run_bytecode_tests(TestContext *ctx) {
         free(disassembly);
         bytecode_program_free(&program);
     }
+
+    {
+        const char *source =
+            "function Ctor(n) { this.value = n; }\n"
+            "let obj = {value: 2, method: function (n) { return this.value + n; }};\n"
+            "let made = new Ctor(3);\n"
+            "obj.method(4);\n";
+        BytecodeProgram program;
+        char *error = NULL;
+        char *disassembly;
+
+        EXPECT_TRUE(ctx, compile_source_text(source, &program, &error));
+        EXPECT_TRUE(ctx, error == NULL);
+        disassembly = bytecode_disassemble_program(&program);
+        EXPECT_TRUE(ctx, strstr(disassembly, "LOAD_THIS") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "NEW_INSTANCE") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_NEW") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "CALL_METHOD") != NULL);
+        EXPECT_TRUE(ctx, strstr(disassembly, "SWAP") != NULL);
+        free(disassembly);
+        bytecode_program_free(&program);
+    }
 }

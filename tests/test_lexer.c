@@ -53,6 +53,14 @@ void run_lexer_tests(TestContext *ctx) {
     EXPECT_INT_EQ(ctx, tokens.items[0].type, TOKEN_CONST);
     token_array_free(&tokens);
 
+    EXPECT_TRUE(ctx, lex_source("this; new Thing();", &tokens, &error));
+    if (error != NULL) {
+        free(error);
+    }
+    EXPECT_INT_EQ(ctx, tokens.items[0].type, TOKEN_THIS);
+    EXPECT_INT_EQ(ctx, tokens.items[2].type, TOKEN_NEW);
+    token_array_free(&tokens);
+
     EXPECT_TRUE(ctx, lex_source("let greeting = \"hi\\nthere\";", &tokens, &error));
     if (error != NULL) {
         free(error);

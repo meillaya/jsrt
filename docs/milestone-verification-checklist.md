@@ -43,6 +43,20 @@ Use this addendum when verifying the bounded L2 milestone. L2 is done only when 
 - [ ] `docs/semantics-baseline.md` is updated to describe the bounded L2 surface, while keeping `this` / `new` / constructors / classes deferred to L3
 - [ ] the ASan lane is re-run after the final object-graph changes land, and the exact command/result are captured in the completion evidence bundle
 
+## L3 `this` / constructor semantics exit gates
+
+Use this addendum when verifying the bounded L3 milestone. L3 is done only when receiver binding and constructors land **without** widening into L4 class/function-object semantics.
+
+- [ ] `this` is verified as `null` for bare/plain/extracted calls and at top level
+- [ ] dot-call and bracket-call method dispatch bind `this` to the original receiver, including prototype-inherited methods
+- [ ] `new Ctor(args)` is verified for instance allocation, constructor field writes, prototype-slot wiring, and constructor return replacement rules
+- [ ] invalid constructor targets (`new` on non-function values or native functions) fail with runtime type diagnostics in both backends
+- [ ] function property behavior stays explicitly narrow: only `prototype` / `["prototype"]` are supported, invalid prototype writes fail, and all other function property reads/writes fail with runtime type diagnostics
+- [ ] bytecode/disassembly evidence covers `CALL`, `CALL_METHOD`, `CALL_NEW`, and the constructor-instance preparation step
+- [ ] evaluator and VM suites cover the same supported positive and negative L3 cases before milestone closure
+- [ ] docs/examples explicitly show L3 support while keeping classes deferred to L4
+- [ ] the ASan lane is re-run after the final function/object graph changes land, and the exact command/result are captured in the completion evidence bundle
+
 ## Design-heavy milestones
 
 - [ ] architect review completed

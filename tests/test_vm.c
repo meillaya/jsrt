@@ -397,6 +397,88 @@ void run_vm_tests(TestContext *ctx) {
         "setPrototypeOf(b, a);\n",
         "setPrototypeOf() cannot create a prototype cycle"
     );
+    assert_backend_parity(ctx, "this == null;\n");
+    assert_backend_parity(
+        ctx,
+        "function Person(name) { this.name = name; }\n"
+        "Person.prototype = {\n"
+        "  describe: function () {\n"
+        "    if (this == null) { return \"null\"; }\n"
+        "    return this.name;\n"
+        "  }\n"
+        "};\n"
+        "let ada = new Person(\"Ada\");\n"
+        "let extracted = ada.describe;\n"
+        "ada.describe() + \":\" + extracted() + \":\" + (this == null);\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Person(name) { this.name = name; }\n"
+        "let proto = {\n"
+        "  greet: function () { return this.name; }\n"
+        "};\n"
+        "Person.prototype = proto;\n"
+        "let ada = new Person(\"Ada\");\n"
+        "ada.greet() + \":\" + ada[\"greet\"]();\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Keep(n) { this.n = n; return 7; }\n"
+        "function Replace() { return {ok: 9}; }\n"
+        "let kept = new Keep(4);\n"
+        "let replaced = new Replace();\n"
+        "kept.n + \":\" + replaced.ok;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "function Box() {}\n"
+        "let firstProto = {label: \"first\"};\n"
+        "let secondProto = {label: \"second\"};\n"
+        "Box.prototype = firstProto;\n"
+        "let first = new Box();\n"
+        "Box[\"prototype\"] = secondProto;\n"
+        "let second = new Box();\n"
+        "Box.prototype.label + \":\" + first.label + \":\" + second.label;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let order = \"\";\n"
+        "function mark(label, value) { order = order + label; return value; }\n"
+        "let obj = {\n"
+        "  value: 0,\n"
+        "  method: function (value) { this.value = value; return this.value; }\n"
+        "};\n"
+        "function getObj() { order = order + \"b\"; return obj; }\n"
+        "getObj()[mark(\"k\", \"method\")](mark(\"a\", 7));\n"
+        "order + \":\" + obj.value;\n"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "let ctor = 1;\n"
+        "new ctor(2);\n",
+        "new expects a constructor function"
+    );
+    assert_backend_parity(ctx, "typeOf(print.prototype);\n");
+    assert_backend_error_contains(ctx, "new print(1);\n", "native functions are not constructors");
+    assert_backend_error_contains(ctx, "print.prototype = {};\n", "native functions are not constructors");
+    assert_backend_error_contains(
+        ctx,
+        "function Box() {}\n"
+        "Box.prototype = 1;\n",
+        "function prototype must be an object or null"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "function Box() {}\n"
+        "Box.extra;\n",
+        "function properties are limited to 'prototype' in L3"
+    );
+    assert_backend_error_contains(
+        ctx,
+        "function Box() {}\n"
+        "Box[0];\n",
+        "function properties are limited to 'prototype' in L3"
+    );
 
     {
         char *error = NULL;
@@ -455,6 +537,19 @@ void run_vm_tests(TestContext *ctx) {
         if (file != NULL) {
             EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
             EXPECT_STRING_EQ(ctx, buffer, "1:new:8:7\n");
+            fclose(file);
+        }
+    }
+
+    {
+        FILE *file;
+        char buffer[128];
+        EXPECT_INT_EQ(ctx, system("JSRT_BACKEND=vm ./build/jsrt examples/constructors.js > build/constructors-example.out"), 0);
+        file = fopen("build/constructors-example.out", "r");
+        EXPECT_TRUE(ctx, file != NULL);
+        if (file != NULL) {
+            EXPECT_TRUE(ctx, fgets(buffer, sizeof(buffer), file) != NULL);
+            EXPECT_STRING_EQ(ctx, buffer, "hello Ada\n");
             fclose(file);
         }
     }

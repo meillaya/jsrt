@@ -76,7 +76,9 @@ typedef enum {
     EXPR_ARRAY,
     EXPR_OBJECT,
     EXPR_INDEX,
-    EXPR_PROPERTY
+    EXPR_PROPERTY,
+    EXPR_THIS,
+    EXPR_NEW
 } ExprKind;
 
 struct Expr {
@@ -129,6 +131,10 @@ struct Expr {
             Expr *target;
             char *name;
         } property;
+        struct {
+            Expr *callee;
+            ExprArray arguments;
+        } new_expr;
     } as;
 };
 
@@ -232,6 +238,8 @@ Expr *ast_new_array_literal(ExprArray elements, int line, int column);
 Expr *ast_new_object_literal(ObjectPropertyArray properties, int line, int column);
 Expr *ast_new_index(Expr *target, Expr *index, int line, int column);
 Expr *ast_new_property(Expr *target, const char *name, int line, int column);
+Expr *ast_new_this(int line, int column);
+Expr *ast_new_new(Expr *callee, ExprArray arguments, int line, int column);
 
 Stmt *ast_new_expr_stmt(Expr *expression, int line, int column);
 Stmt *ast_new_var_stmt(const char *name, Expr *initializer, bool is_const, int line, int column);
