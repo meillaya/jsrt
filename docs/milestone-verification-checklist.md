@@ -408,3 +408,54 @@ The original M1 implementation diff is not isolated as one clean historical comm
 - Keep GC trace mode opt-in unless a future milestone intentionally changes that UX contract.
 - Treat deeper collector-policy or allocation-trigger work as later milestones rather than retroactively widening M1.
 - Preserve the stress fixture as a semantics-grounded regression tool, not just a debugging demo.
+
+## M7 closure record — 2026-04-23
+
+This section formally closes the bounded **M7 — Bytecode Compiler MVP** milestone against its approved PRD/test-spec and the retained repo evidence below.
+
+This closure record applies to the original compiler-only M7 boundary: bytecode representation, AST-to-bytecode lowering for the bounded subset, stable disassembly, and explicit compiler diagnostics for deferred surface. It does **not** retroactively absorb later VM execution work from M8 or later widening from M9/M10.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1035 assertions`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1035 assertions`
+- Compiler/disassembly evidence is retained in `tests/test_bytecode.c`, including stable disassembly checks and explicit unsupported-surface diagnostics.
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
+  - `docs/bytecode-compiler-mvp.md`
+- Historical implementation closure is also anchored by commit `fbf7d57` (`Turn the backend plan into a concrete compiler/disassembler artifact`).
+
+### Changed files in the M7 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-m7-bytecode-compiler-mvp.md`
+- `Makefile`
+- `README.md`
+- `docs/bytecode-compiler-mvp.md`
+- `examples/bytecode_fixture.js`
+- `include/jsrt/bytecode.h`
+- `include/jsrt/compiler.h`
+- `src/bytecode.c`
+- `src/compiler.c`
+- `tests/test.h`
+- `tests/test_bytecode.c`
+- `tests/test_runner.c`
+
+### Simplifications made
+
+- Kept M7 compiler-only instead of collapsing compiler and VM execution risk into one milestone.
+- Used stable disassembly and compiler-focused tests rather than inventing a separate CLI/disassembly product surface.
+- Preferred explicit compiler diagnostics for deferred constructs over ambiguous partial lowering.
+
+### Remaining risks
+
+- The original M7 compiler-only boundary is narrower than the current shipped compiler surface after later milestones.
+- Later backend milestones widened compiler support; this closure should not be read as a complete proof for every currently supported backend feature.
+- Disassembly formatting remains a contract that later work should change only deliberately and with test updates.
+
+### Milestone-specific follow-ups
+
+- Preserve explicit unsupported-surface diagnostics unless a later milestone truly implements the deferred surface.
+- Treat VM execution and later widening as distinct milestones rather than retroactively broadening M7.
+- Keep disassembly stability intentional and test-backed if formatting evolves.

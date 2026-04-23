@@ -34,7 +34,7 @@ Document-role boundaries:
 | M4 — Built-in library foundation | DONE | Evidence | `docs/built-in-library-foundation.md`; `README.md`; `src/eval.c`; `tests/test_eval.c` | `print`, `len`, `typeOf`, and `setPrototypeOf` exist as the bounded built-in surface. |
 | M5 — Exceptionless structured runtime error model | DONE | Evidence | `docs/runtime-error-model.md`; `tests/test_diagnostics.c`; `src/eval.c` | Structured runtime error categories and source-based reporting are current behavior. |
 | M6 — Bytecode / IR architecture spike | DONE | Evidence | `docs/bytecode-ir-architecture-spike.md`; `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | Design/ADR milestone: backend direction artifact exists and handed off to M7/M8. |
-| M7 — Bytecode compiler MVP | DONE | Evidence | `docs/bytecode-compiler-mvp.md`; `src/compiler.c`; `tests/test_bytecode.c` | Compiler and disassembler are present and documented. |
+| M7 — Bytecode compiler MVP | DONE | Evidence | `docs/bytecode-compiler-mvp.md`; `docs/milestone-verification-checklist.md`; `src/compiler.c`; `tests/test_bytecode.c` | Compiler and disassembler are present and documented, and the checklist now contains an explicit M7 closure record. |
 | M8 — VM interpreter parity backend | DONE | Evidence | `docs/vm-parity-backend.md`; `docs/milestone-verification-checklist.md`; `README.md`; `src/vm.c`; `tests/test_vm.c` | Opt-in VM backend exists and now has an explicit closure record for the original bounded parity milestone. |
 | M9 — VM surface widening I | DONE | Evidence + Inference | `docs/vm-parity-backend.md`; `docs/project-status-and-architecture.md`; `tests/test_vm.c` | The current bounded VM subset already includes aggregate operations plus the structured control-flow gaps (`do...while`, `switch`, `break`, `continue`), so the planned M9 widening scope is now subsumed by the shipped backend surface. |
 | M10 — VM closure + function-expression parity | DONE | Evidence + Inference | `docs/vm-parity-backend.md`; `docs/project-status-and-architecture.md`; `src/compiler.c`; `tests/test_vm.c`; `tests/test_bytecode.c` | The current bounded VM/compiler surface already includes function expressions, closure capture, and upvalue lowering, so the planned M10 parity scope is now subsumed by the shipped backend surface. |
@@ -62,6 +62,7 @@ These milestones have a repo-local artifact that directly records completion or 
 | M2 — Aggregate semantics ADR (`copy` vs `reference`) | `.omx/plans/adr-javascript-runtime-m2-aggregate-semantics.md` | ADR says it is **accepted for roadmap handoff to M3**, which is the completion artifact for this design milestone. |
 | M3 — Mutable aggregate/reference model implementation | `docs/milestone-verification-checklist.md` | Contains the **M3 closure record — 2026-04-23** with retained reference-semantics/example/ASan evidence for the bounded M3 surface. |
 | M6 — Bytecode / IR architecture spike | `.omx/plans/adr-javascript-runtime-m6-bytecode-ir-direction.md` | ADR says it is **accepted for roadmap handoff to M7/M8**, which is the completion artifact for this design milestone. |
+| M7 — Bytecode compiler MVP | `docs/milestone-verification-checklist.md` | Contains the **M7 closure record — 2026-04-23** with retained compiler/disassembly/ASan evidence for the bounded M7 surface. |
 | M8 — VM interpreter parity backend | `docs/milestone-verification-checklist.md` | Contains the **M8 closure record — 2026-04-23** with retained parity/backend-switch/ASan evidence for the original bounded M8 surface. |
 | M1 — GC observability and stress rig | `docs/milestone-verification-checklist.md` | Contains the **M1 closure record — 2026-04-23** with retained debug-build/trace/stress evidence for the bounded M1 surface. |
 | L1 — Benchmark and profiling harness | `docs/milestone-verification-checklist.md` | Contains the **L1 closure record — 2026-04-23** with retained harness/smoke/live-schema evidence for the bounded L1 workflow. |
@@ -71,7 +72,7 @@ These milestones have a repo-local artifact that directly records completion or 
 
 These milestones are marked `DONE` because the current repo clearly ships their bounded surface, but there is no single dedicated closure record currently serving as the milestone’s canonical completion artifact:
 
-`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M4`, `M5`, `M7`, `M9`, `M10`, `L2`, `L3`
+`N1`, `N2`, `N3`, `N4`, `N5`, `N6`, `M4`, `M5`, `M9`, `M10`, `L2`, `L3`
 
 For these rows, the ledger relies on the cited current-state docs, examples, tests, and implementation files rather than a standalone milestone-closure record.
 
