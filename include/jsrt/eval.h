@@ -34,6 +34,7 @@ typedef struct {
 } EvalResult;
 
 EvalResult eval_program(const StmtArray *program, const char *source, Env *env);
+EvalResult eval_program_with_path(const StmtArray *program, const char *source, Env *env, const char *module_path);
 void eval_result_free(EvalResult *result);
 
 #endif

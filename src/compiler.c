@@ -1129,6 +1129,16 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
             return compile_while_statement(compiler, stmt, error_message);
         case STMT_SWITCH:
             return compile_switch_statement(compiler, stmt, error_message);
+        case STMT_IMPORT:
+        case STMT_EXPORT:
+            return set_compile_error(
+                compiler->source,
+                stmt->line,
+                stmt->column,
+                6,
+                "modules are supported by the tree-walk backend only in L5; unset JSRT_BACKEND=vm",
+                error_message
+            );
         case STMT_FUNCTION: {
             int function_index;
             if (!compile_function_body(

@@ -77,7 +77,7 @@ When N8 changes this document, it must keep these constraints explicit:
 ## Evaluator ownership guardrails
 
 - `EvalResult.value` is owned by the caller and must be released with `value_free`.
-- `eval_result_free` only frees the error message, not the value payload.
+- `eval_result_free` frees the error message and any module-loader artifacts retained for the evaluation; callers must release `EvalResult.value` with `value_free` before calling it.
 - `EvalResult` also carries structured runtime error metadata; successful paths reset it to `RUNTIME_ERROR_NONE`.
 - Control-flow helpers (`is_return`, `is_break`, `is_continue`) piggyback on `EvalResult`.
 - Runtime code must free intermediate values on all success and error branches.

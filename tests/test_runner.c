@@ -8,6 +8,7 @@ int main(void) {
     run_lexer_tests(&ctx);
     run_parser_tests(&ctx);
     run_eval_tests(&ctx);
+    run_runtime_tests(&ctx);
     run_diagnostics_tests(&ctx);
     run_bytecode_tests(&ctx);
     run_vm_tests(&ctx);

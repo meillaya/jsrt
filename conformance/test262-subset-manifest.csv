@@ -1,0 +1,5 @@
+id,feature,milestone,tier,source,local_path,backends,expect,stdout,stderr_contains,skip_reason,xfail_reason
+local-const-assignment,bindings,P3,supported,repo-local,conformance/negative/const_assign.js,tree,failure,,cannot assign to const variable,,
+local-module-export,modules,M6,experimental,repo-local,conformance/positive/module_main.js,tree,success,42,,,
+future-promise-then,promise,A4,future,test262-placeholder,,tree,skip,,,Promise subset not implemented before A4,
+rejected-with-statement,syntax,P3,rejected,test262-placeholder,,tree,skip,,,with statement is outside jsrt production subset,

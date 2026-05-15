@@ -112,6 +112,8 @@ static void synchronize(Parser *parser) {
             case TOKEN_LET:
             case TOKEN_FUNCTION:
             case TOKEN_CLASS:
+            case TOKEN_IMPORT:
+            case TOKEN_EXPORT:
             case TOKEN_IF:
             case TOKEN_DO:
             case TOKEN_FOR:
@@ -1135,7 +1137,100 @@ static Stmt *parse_function_declaration(Parser *parser) {
     return ast_new_function_stmt(name_token->lexeme, params, body, keyword->line, keyword->column);
 }
 
+static Stmt *parse_import_declaration(Parser *parser) {
+    const Token *keyword = previous(parser);
+    ImportSpecifierArray specifiers;
+
+    import_specifier_array_init(&specifiers);
+
+    if (!consume(parser, TOKEN_LEFT_BRACE, "expected '{' after 'import'")) {
+        import_specifier_array_free(&specifiers);
+        return NULL;
+    }
+    if (check(parser, TOKEN_RIGHT_BRACE)) {
+        set_error(parser, peek(parser), "import declarations require at least one imported name");
+        import_specifier_array_free(&specifiers);
+        return NULL;
+    }
+
+    do {
+        const Token *imported;
+        const Token *local;
+        ImportSpecifier specifier;
+
+        if (!consume(parser, TOKEN_IDENTIFIER, "expected imported name")) {
+            import_specifier_array_free(&specifiers);
+            return NULL;
+        }
+        imported = previous(parser);
+        local = imported;
+        if (match(parser, TOKEN_AS)) {
+            if (!consume(parser, TOKEN_IDENTIFIER, "expected local name after 'as'")) {
+                import_specifier_array_free(&specifiers);
+                return NULL;
+            }
+            local = previous(parser);
+        }
+
+        specifier.imported_name = jsrt_strdup(imported->lexeme);
+        specifier.local_name = jsrt_strdup(local->lexeme);
+        import_specifier_array_push(&specifiers, specifier);
+    } while (match(parser, TOKEN_COMMA));
+
+    if (!consume(parser, TOKEN_RIGHT_BRACE, "expected '}' after imported names")) {
+        import_specifier_array_free(&specifiers);
+        return NULL;
+    }
+    if (!consume(parser, TOKEN_FROM, "expected 'from' after imported names")) {
+        import_specifier_array_free(&specifiers);
+        return NULL;
+    }
+    if (!consume(parser, TOKEN_STRING, "expected module path string after 'from'")) {
+        import_specifier_array_free(&specifiers);
+        return NULL;
+    }
+    {
+        const Token *path = previous(parser);
+        Stmt *stmt;
+        if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after import declaration")) {
+            import_specifier_array_free(&specifiers);
+            return NULL;
+        }
+        stmt = ast_new_import_stmt(specifiers, path->lexeme, keyword->line, keyword->column);
+        return stmt;
+    }
+}
+
+static Stmt *parse_export_declaration(Parser *parser) {
+    const Token *keyword = previous(parser);
+    Stmt *declaration = NULL;
+
+    if (match(parser, TOKEN_LET)) {
+        declaration = parse_var_declaration(parser, false);
+    } else if (match(parser, TOKEN_CONST)) {
+        declaration = parse_var_declaration(parser, true);
+    } else if (match(parser, TOKEN_FUNCTION)) {
+        declaration = parse_function_declaration(parser);
+    } else if (match(parser, TOKEN_CLASS)) {
+        declaration = parse_class_declaration(parser);
+    } else {
+        set_error(parser, peek(parser), "expected declaration after 'export'");
+        return NULL;
+    }
+
+    if (declaration == NULL) {
+        return NULL;
+    }
+    return ast_new_export_stmt(declaration, keyword->line, keyword->column);
+}
+
 static Stmt *parse_declaration(Parser *parser) {
+    if (match(parser, TOKEN_IMPORT)) {
+        return parse_import_declaration(parser);
+    }
+    if (match(parser, TOKEN_EXPORT)) {
+        return parse_export_declaration(parser);
+    }
     if (match(parser, TOKEN_FUNCTION)) {
         return parse_function_declaration(parser);
     }

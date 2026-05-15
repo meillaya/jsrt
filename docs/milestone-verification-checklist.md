@@ -459,3 +459,310 @@ This closure record applies to the original compiler-only M7 boundary: bytecode 
 - Preserve explicit unsupported-surface diagnostics unless a later milestone truly implements the deferred surface.
 - Treat VM execution and later widening as distinct milestones rather than retroactively broadening M7.
 - Keep disassembly stability intentional and test-backed if formatting evolves.
+
+## L5 closure record — 2026-05-15
+
+This section formally closes the bounded **L5 — Module system (`import` / `export`)** milestone against the ultragoal story objective and retained repo evidence below.
+
+This closure applies to the intentionally narrow tree-walk module surface: static named imports from string-literal file specifiers, declaration exports, relative path resolution from the importing file, exported-name enforcement, and explicit VM-backend deferral. It does **not** claim full ECMAScript module compatibility.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1062 assertions`
+- `./build/jsrt examples/modules.js` → `82`
+- `JSRT_BACKEND=vm ./build/jsrt examples/modules.js` rejects module syntax with the L5 tree-walk-only compiler diagnostic.
+- Lexer/parser/evaluator coverage is retained in:
+  - `tests/test_lexer.c`
+  - `tests/test_parser.c`
+  - `tests/test_eval.c`
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-l5-module-system.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-l5-module-system.md`
+  - `docs/module-system.md`
+
+### Changed files in the L5 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-l5-module-system.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-l5-module-system.md`
+- `README.md`
+- `docs/module-system.md`
+- `docs/project-status-and-architecture.md`
+- `docs/repo-milestone-status.md`
+- `docs/semantics-baseline.md`
+- `examples/module_math.js`
+- `examples/modules.js`
+- `include/jsrt/ast.h`
+- `include/jsrt/eval.h`
+- `include/jsrt/token.h`
+- `src/ast.c`
+- `src/compiler.c`
+- `src/eval.c`
+- `src/lexer.c`
+- `src/main.c`
+- `src/parser.c`
+- `tests/test_eval.c`
+- `tests/test_lexer.c`
+- `tests/test_parser.c`
+
+### Simplifications made
+
+- Chose static named imports and declaration exports only instead of attempting default exports, namespace imports, dynamic imports, or package resolution.
+- Kept module execution on the tree-walk backend and made VM deferral explicit through a compiler diagnostic.
+- Reused the existing environment, diagnostics, and function/closure machinery rather than adding a separate module object model.
+- Rejected circular imports instead of introducing partially initialized bindings.
+
+### Remaining risks
+
+- Module records are process-local evaluation artifacts rather than a stable public module cache API.
+- Relative path handling is intentionally simple and not a package resolver.
+- VM parity for modules is deferred and must be designed deliberately if a later milestone needs it.
+
+### Milestone-specific follow-ups
+
+- Do not widen module syntax without updating `docs/module-system.md`, `docs/semantics-baseline.md`, and parser/evaluator tests.
+- Preserve the explicit VM diagnostic until module lowering is implemented and parity-tested.
+- Treat cyclic modules and package resolution as separate future decisions, not implied L5 behavior.
+
+## L6 closure record — 2026-05-15
+
+This section formally closes the bounded **L6 — Embeddable host API** milestone against the ultragoal story objective and retained repo evidence below.
+
+This closure applies to a small source/file evaluation C API with explicit runtime lifecycle, caller-owned result strings, and structured runtime error kind propagation. It does **not** claim a stable ABI, native host callback interface, direct mutable `Value` handles, custom allocator support, or VM backend embedding.
+
+### Evidence retained
+
+- `make clean && make test` → `Tests passed: 1075 assertions`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1075 assertions`
+- `cc -std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g examples/embed_host.c $(find build/obj/src -name '*.o' ! -name 'main.o' | sort) -o build/embed_host_example && ./build/embed_host_example` → `42`
+- Host API coverage is retained in `tests/test_runtime.c`, including source evaluation, runtime diagnostics, result cleanup, and file/module evaluation.
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-l6-embeddable-host-api.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-l6-embeddable-host-api.md`
+  - `docs/embeddable-host-api.md`
+
+### Changed files in the L6 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-l6-embeddable-host-api.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-l6-embeddable-host-api.md`
+- `Makefile`
+- `README.md`
+- `docs/embeddable-host-api.md`
+- `docs/project-status-and-architecture.md`
+- `docs/repo-milestone-status.md`
+- `docs/semantics-baseline.md`
+- `examples/embed_host.c`
+- `include/jsrt/runtime.h`
+- `src/runtime.c`
+- `tests/test.h`
+- `tests/test_runner.c`
+- `tests/test_runtime.c`
+
+### Simplifications made
+
+- Returned final values as owned text instead of exposing mutable runtime `Value` handles across the API boundary.
+- Reused the existing lexer/parser/tree-walk evaluator and diagnostics path rather than introducing a separate host execution engine.
+- Kept VM backend selection and native callback registration outside L6 to avoid unstable API commitments.
+
+### Remaining risks
+
+- The API is intentionally small and source/file-oriented; embedders needing native callbacks or direct value manipulation need a future milestone.
+- `JsrtRuntime` is a lifecycle handle, not a full isolated realm or configurable runtime policy object.
+- API/ABI stability is not promised beyond this repository's bounded learning runtime contract.
+
+### Milestone-specific follow-ups
+
+- Do not expose direct `Value` handles without a documented ownership and lifetime model.
+- Keep CLI behavior separate from host API behavior unless a future milestone deliberately unifies them.
+- Add host callback and custom allocator support only with dedicated tests and docs.
+
+## L7 closure record — 2026-05-15
+
+This section formally closes the bounded **L7 — Async / event-loop experiment** milestone against the ultragoal story objective and retained repo evidence below.
+
+This closure applies to the explicit deferred-callback experiment exposed through `defer(callback)` and `runJobs()`. It does **not** implement promises, `async` / `await`, timers, I/O events, microtasks, concurrency, or host event-loop integration.
+
+### Evidence retained
+
+- `make test` → `Tests passed: 1080 assertions`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1080 assertions`
+- Deferred-callback coverage is retained in `tests/test_eval.c`, including closure mutation, FIFO drain behavior, and non-function callback diagnostics.
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-l7-async-event-loop-experiment.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-l7-async-event-loop-experiment.md`
+  - `docs/async-event-loop-experiment.md`
+
+### Changed files in the L7 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-l7-async-event-loop-experiment.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-l7-async-event-loop-experiment.md`
+- `README.md`
+- `docs/async-event-loop-experiment.md`
+- `docs/project-status-and-architecture.md`
+- `docs/repo-milestone-status.md`
+- `docs/semantics-baseline.md`
+- `src/eval.c`
+- `tests/test_eval.c`
+
+### Simplifications made
+
+- Used explicit built-ins instead of syntax-level `async` / `await`.
+- Reused the existing function invocation path for callbacks.
+- Kept callbacks synchronous at `runJobs()` time to avoid unowned host scheduler semantics.
+
+### Remaining risks
+
+- This is an experiment and should not be presented as JavaScript promise compatibility.
+- There is no scheduler fairness, cancellation, timer, or I/O model.
+- VM support for `defer` / `runJobs` depends on the existing native built-in path but broader async lowering is out of scope.
+
+### Milestone-specific follow-ups
+
+- Any future promise/microtask work must get a new semantics doc and test-spec.
+- Preserve queued callback GC rooting if the evaluator safe-point model changes.
+- Do not add host event-loop integration without extending the L6 host API contract deliberately.
+
+## L8 closure record — 2026-05-15
+
+This section formally closes the bounded **L8 — Regex + richer standard library** milestone against the ultragoal story objective and retained repo evidence below.
+
+This closure applies to dependency-free string helpers and a tiny regex matcher exposed through `strContains`, `strSlice`, and `regexMatch`. It does **not** implement ECMAScript `RegExp`, regex literals, captures, flags, alternation, character classes, Unicode classes, or replacement APIs.
+
+### Evidence retained
+
+- `make test` → `Tests passed: 1087 assertions`
+- `make clean && make test CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g -fsanitize=address -fno-omit-frame-pointer'` → `Tests passed: 1087 assertions`
+- String/regex built-in coverage is retained in `tests/test_eval.c`, including success cases and type/range diagnostics.
+- Current-facing milestone contract artifacts are retained in:
+  - `.omx/plans/prd-javascript-runtime-roadmap-l8-regex-richer-stdlib.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-l8-regex-richer-stdlib.md`
+  - `docs/regex-and-stdlib.md`
+
+### Changed files in the L8 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-l8-regex-richer-stdlib.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-l8-regex-richer-stdlib.md`
+- `README.md`
+- `docs/project-status-and-architecture.md`
+- `docs/regex-and-stdlib.md`
+- `docs/repo-milestone-status.md`
+- `docs/semantics-baseline.md`
+- `src/eval.c`
+- `tests/test_eval.c`
+
+### Simplifications made
+
+- Added a tiny dependency-free regex subset instead of bringing in an external regex dependency.
+- Used built-ins instead of adding regex literal syntax.
+- Kept string helpers byte-indexed and explicitly range-checked.
+
+### Remaining risks
+
+- `regexMatch` is intentionally small and should not be marketed as ECMAScript `RegExp`.
+- Byte-indexed slicing is simple but not Unicode-aware.
+- Additional string/regex APIs need dedicated tests and docs before being considered supported.
+
+### Milestone-specific follow-ups
+
+- Do not add regex syntax without parser diagnostics and semantics docs.
+- Keep dependency-free behavior unless a later milestone explicitly accepts a dependency tradeoff.
+- If richer regex semantics are added, rename or version docs so L8's tiny subset remains understandable.
+
+## L9 closure record — 2026-05-15
+
+This section formally closes the bounded **L9 — Conformance subset harness** milestone against the ultragoal story objective and retained repo evidence below.
+
+This closure applies to a repo-local CSV-manifest harness for positive/negative fixtures with tree-walk and VM backend applicability. It does **not** import Test262 or claim broad ECMAScript compatibility.
+
+### Evidence retained
+
+- `make test` → `Tests passed: 1087 assertions`
+- `make conformance` → `Conformance passed: 7 case(s)`
+- Harness artifacts are retained in:
+  - `conformance/manifest.csv`
+  - `conformance/positive/`
+  - `conformance/negative/`
+  - `scripts/conformance.sh`
+  - `docs/conformance-subset-harness.md`
+
+### Changed files in the L9 milestone implementation
+
+- `.omx/plans/prd-javascript-runtime-roadmap-l9-conformance-subset-harness.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-l9-conformance-subset-harness.md`
+- `Makefile`
+- `README.md`
+- `conformance/manifest.csv`
+- `conformance/positive/arithmetic.js`
+- `conformance/positive/module_lib.js`
+- `conformance/positive/module_main.js`
+- `conformance/negative/const_assign.js`
+- `conformance/negative/division_by_zero.js`
+- `conformance/negative/import_lib.js`
+- `conformance/negative/import_hidden.js`
+- `docs/conformance-subset-harness.md`
+- `docs/project-status-and-architecture.md`
+- `docs/repo-milestone-status.md`
+- `docs/semantics-baseline.md`
+- `scripts/conformance.sh`
+
+### Simplifications made
+
+- Used a simple CSV manifest instead of dynamic discovery or external test-suite import.
+- Checked stable stdout and diagnostic substrings instead of whole diagnostic snapshots.
+- Added backend applicability per case so tree-only features do not masquerade as VM parity.
+
+### Remaining risks
+
+- The manifest parser intentionally does not support complex CSV escaping.
+- The harness is a project subset, not an ECMAScript conformance certification.
+- More fixtures are needed over time to make the subset representative.
+
+### Milestone-specific follow-ups
+
+- Add a conformance fixture whenever a future milestone changes externally visible behavior.
+- Keep backend applicability explicit for every fixture.
+- Do not import large external conformance suites without a dedicated dependency/process decision.
+
+## L10 closure record — 2026-05-15
+
+This section formally closes the bounded **L10 — Optional JIT / advanced optimization feasibility study** milestone against the ultragoal story objective and retained repo evidence below.
+
+This closure is documentation/decision-only. It recommends deferring native JIT implementation and pursuing bytecode peephole optimization plus literal-only constant folding first. It does **not** implement a runtime optimizer or native code generator.
+
+### Evidence retained
+
+- `make test` → `Tests passed: 1087 assertions`
+- `make conformance` → `Conformance passed: 7 case(s)`
+- Feasibility artifacts are retained in:
+  - `docs/optimization-feasibility-study.md`
+  - `.omx/plans/adr-javascript-runtime-l10-optimization-feasibility.md`
+  - `.omx/plans/prd-javascript-runtime-roadmap-l10-optimization-feasibility.md`
+  - `.omx/plans/test-spec-javascript-runtime-roadmap-l10-optimization-feasibility.md`
+
+### Changed files in the L10 milestone implementation
+
+- `.omx/plans/adr-javascript-runtime-l10-optimization-feasibility.md`
+- `.omx/plans/prd-javascript-runtime-roadmap-l10-optimization-feasibility.md`
+- `.omx/plans/test-spec-javascript-runtime-roadmap-l10-optimization-feasibility.md`
+- `README.md`
+- `docs/optimization-feasibility-study.md`
+- `docs/project-status-and-architecture.md`
+- `docs/repo-milestone-status.md`
+- `docs/semantics-baseline.md`
+
+### Simplifications made
+
+- Closed L10 as an ADR-backed feasibility decision instead of adding speculative optimizer code.
+- Preferred bytecode/local optimization follow-ups over native JIT complexity.
+- Grounded future optimization work in existing tests, conformance fixtures, and benchmark harnesses.
+
+### Remaining risks
+
+- No performance improvement is delivered by L10 itself.
+- Future optimizer work still needs implementation-specific tests and benchmark evidence.
+- Native JIT feasibility may change if project goals shift toward performance over portability/clarity.
+
+### Milestone-specific follow-ups
+
+- Start with a dedicated O1 bytecode peephole optimizer milestone if optimization work continues.
+- Require an executable-memory/security ADR before any native JIT experiment.
+- Keep the tree-walk evaluator as semantic oracle for optimization validation.

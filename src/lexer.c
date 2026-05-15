@@ -93,6 +93,10 @@ const char *token_type_name(TokenType type) {
         case TOKEN_CLASS: return "class";
         case TOKEN_EXTENDS: return "extends";
         case TOKEN_SUPER: return "super";
+        case TOKEN_IMPORT: return "import";
+        case TOKEN_EXPORT: return "export";
+        case TOKEN_FROM: return "from";
+        case TOKEN_AS: return "as";
         case TOKEN_RETURN: return "return";
         case TOKEN_IF: return "if";
         case TOKEN_ELSE: return "else";
@@ -131,6 +135,18 @@ static TokenType identifier_type(const char *lexeme) {
     }
     if (strcmp(lexeme, "super") == 0) {
         return TOKEN_SUPER;
+    }
+    if (strcmp(lexeme, "import") == 0) {
+        return TOKEN_IMPORT;
+    }
+    if (strcmp(lexeme, "export") == 0) {
+        return TOKEN_EXPORT;
+    }
+    if (strcmp(lexeme, "from") == 0) {
+        return TOKEN_FROM;
+    }
+    if (strcmp(lexeme, "as") == 0) {
+        return TOKEN_AS;
     }
     if (strcmp(lexeme, "return") == 0) {
         return TOKEN_RETURN;

@@ -6,6 +6,8 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 
 - The CLI executes a single script file: `./build/jsrt <script.js>`.
 - `JSRT_BACKEND=vm ./build/jsrt <script.js>` opts into the bounded VM backend for the compiler-supported subset.
+- On the tree-walk backend, static named module imports resolve relative file paths from the importing file's directory.
+- Hosts can embed the tree-walk evaluator through the bounded C API in `include/jsrt/runtime.h`.
 - On success, the CLI prints the final non-`null` program value as a string plus newline.
 - On lexer/parser/runtime failure, the CLI prints a source-based diagnostic and exits non-zero.
 
@@ -30,6 +32,11 @@ This document freezes the current externally visible behavior of `jsrt` at the c
 | `len(value)` | returns length/count for strings, arrays, and objects | `tests/test_eval.c`, `src/eval.c` |
 | `typeOf(value)` | returns stable runtime type labels | `tests/test_eval.c`, `src/eval.c` |
 | `setPrototypeOf(object, protoOrNull)` | sets or clears an object's prototype, returns the receiver, and rejects non-object receivers, invalid prototype values, self-links, and prototype cycles | `tests/test_eval.c`, `tests/test_vm.c`, `src/eval.c`, `src/vm.c` |
+| `defer(callback)` | enqueues a function callback in the bounded L7 job queue | `tests/test_eval.c`, `src/eval.c` |
+| `runJobs()` | synchronously drains the bounded L7 job queue FIFO | `tests/test_eval.c`, `src/eval.c` |
+| `strContains(text, needle)` | returns whether one string contains another | `tests/test_eval.c`, `src/eval.c` |
+| `strSlice(text, start, end)` | returns a half-open byte slice and rejects invalid ranges | `tests/test_eval.c`, `src/eval.c` |
+| `regexMatch(text, pattern)` | matches a tiny dependency-free regex subset with literals, `.`, `*`, `^`, and `$` | `tests/test_eval.c`, `src/eval.c` |
 
 ## Control flow baseline
 
@@ -88,6 +95,85 @@ Evidence:
 - `src/vm.c`
 - `src/value.c`
 
+## Module baseline
+
+- Static named imports are supported with `import { name, exported as local } from "./path.js";`.
+- Exported declarations are supported with `export const`, `export let`, `export function`, and `export class`.
+- Imported bindings are defined as const bindings in the importing top-level environment.
+- Only explicitly exported names are importable; non-exported module locals fail with a lookup diagnostic.
+- Relative module specifiers resolve from the importing file's directory.
+- Module declarations are top-level only in the bounded L5 surface.
+- Module execution is tree-walk only in L5. The VM backend rejects module syntax with an explicit compiler diagnostic.
+- Default exports, namespace imports, export lists, side-effect-only imports, dynamic imports, package resolution, and circular module graphs remain unsupported.
+
+Evidence:
+- `docs/module-system.md`
+- `examples/modules.js`
+- `tests/test_lexer.c`
+- `tests/test_parser.c`
+- `tests/test_eval.c`
+
+## Embeddable host API baseline
+
+- `JsrtRuntime` owns an evaluation context lifecycle.
+- `jsrt_runtime_eval_source` evaluates source text with an optional virtual module path for relative import resolution.
+- `jsrt_runtime_eval_file` reads and evaluates a file path.
+- `JsrtRunResult` returns textual final values and structured runtime error kinds; callers free result-owned strings with `jsrt_run_result_free`.
+- The host API is intentionally tree-walk/source-evaluation only in L6 and does not expose direct mutable `Value` handles, native callbacks, custom allocators, or VM backend selection.
+
+Evidence:
+- `include/jsrt/runtime.h`
+- `src/runtime.c`
+- `tests/test_runtime.c`
+- `docs/embeddable-host-api.md`
+
+## Async / event-loop experiment baseline
+
+- `defer(function () { ... })` queues a zero-argument callback and returns `null`.
+- `runJobs()` drains queued callbacks FIFO and returns `null`.
+- Deferred callbacks are normal closures and may mutate captured state when run.
+- Jobs queued during `runJobs()` are also drained before `runJobs()` returns.
+- L7 is an explicit experiment, not full JavaScript async semantics.
+
+Evidence:
+- `docs/async-event-loop-experiment.md`
+- `tests/test_eval.c`
+- `src/eval.c`
+
+## Regex / richer standard library baseline
+
+- `strContains`, `strSlice`, and `regexMatch` extend the bounded built-in library.
+- `regexMatch` supports literal characters, `.`, `*`, `^`, and `$`.
+- Regex matching is dependency-free and intentionally not ECMAScript `RegExp`.
+- Character classes, groups/captures, alternation, flags, escapes, replacement APIs, and regex literals remain unsupported.
+
+Evidence:
+- `docs/regex-and-stdlib.md`
+- `tests/test_eval.c`
+- `src/eval.c`
+
+## Conformance subset harness baseline
+
+- `make conformance` runs a repo-local CSV-manifest harness.
+- Fixtures can target `tree`, `vm`, or `both` backends.
+- Cases assert success stdout or failure diagnostic substrings.
+- The harness is explicitly a bounded project subset, not Test262.
+
+Evidence:
+- `docs/conformance-subset-harness.md`
+- `conformance/manifest.csv`
+- `scripts/conformance.sh`
+
+## Optimization / JIT feasibility baseline
+
+- L10 is closed as a feasibility-study milestone, not a runtime optimizer implementation.
+- Native JIT work is explicitly deferred.
+- The recommended future path is bytecode peephole optimization and literal-only constant folding, guarded by tests, conformance fixtures, and benchmarks.
+
+Evidence:
+- `docs/optimization-feasibility-study.md`
+- `.omx/plans/adr-javascript-runtime-l10-optimization-feasibility.md`
+
 ## Parser / diagnostics baseline
 
 - Parser is recursive-descent and supports aggregated syntax diagnostics after recovery to later statement boundaries.
@@ -104,13 +190,16 @@ Evidence:
 
 These are not part of the current baseline:
 
-- modules / imports / exports
 - `extends` / `super`
 - static methods, fields, getters/setters, computed method names, and class expressions
 - bare `new Ctor` without parentheses
 - constructor-result postfix chaining such as `new Ctor().field`
-- async / event loop behavior
+- `async` / `await`, promises, timers, I/O event loops, and microtasks
+- native host callbacks and direct host-managed runtime values
 - broad ECMAScript coercion compatibility
+- ECMAScript `RegExp` compatibility beyond the bounded `regexMatch` subset
+- broad Test262 / ECMAScript conformance claims beyond `make conformance`
+- native JIT and optimization passes beyond the L10 feasibility recommendation
 - sparse arrays / array growth on assignment
 - assignment through arbitrary non-variable roots like `makeObj().x = 1`
 
@@ -120,3 +209,8 @@ If a future milestone changes any item above, it should:
 1. update this baseline,
 2. add targeted regression coverage,
 3. call out the change explicitly in its milestone PRD/test-spec.
+
+
+## Production subset authority
+
+The current production support boundary is defined by `docs/production/subset-specification.md` and `docs/production/support-tier-matrix.md`. This semantics baseline describes implemented behavior, but support-tier movement must update the production docs, targeted tests, and milestone ledger together.

@@ -6,6 +6,8 @@ Older milestone docs such as `docs/vm-parity-backend.md` capture the scope of a 
 
 For the canonical milestone-by-milestone status synthesis, see `docs/repo-milestone-status.md`. This file focuses on the current implementation and architectural shape, not the authoritative per-milestone ledger.
 
+For current production-subset claims, use `docs/production/subset-specification.md` and `docs/production/support-tier-matrix.md` as the support authority. Unsupported or future ECMAScript surfaces must not be inferred as supported from historical roadmap notes.
+
 ## 1. Project thesis
 
 `jsrt` is a small JavaScript-like runtime written in C. The project is explicitly learning-first: the code favors clarity, explicit ownership, and milestone-by-milestone evolution over full ECMAScript compatibility.
@@ -148,7 +150,10 @@ It currently implements:
 - function declarations and function expressions
 - closure capture
 - arrays/objects with property/index access and mutation
-- built-ins `print`, `len`, and `typeOf`
+- built-ins `print`, `len`, `typeOf`, `defer`, `runJobs`, `strContains`, `strSlice`, and `regexMatch`
+- bounded static named `import` / declaration `export` modules on the tree-walk backend
+- embeddable source/file evaluation through `include/jsrt/runtime.h`
+- a bounded L7 deferred-callback job queue through `defer` / `runJobs`
 
 The evaluator uses an explicit `EvalResult` structure rather than exceptions. That structure carries success values, control-flow signals, and structured runtime error metadata.
 
@@ -244,7 +249,7 @@ Achieved so far:
 - bounded class declarations lowered onto the constructor/prototype runtime
 - `if`, `while`, `for`, `do...while`, `switch`, `break`, `continue`
 - `const` declarations
-- built-ins `print`, `len`, and `typeOf`
+- built-ins `print`, `len`, `typeOf`, `defer`, `runJobs`, `strContains`, `strSlice`, and `regexMatch`
 
 Representative examples:
 
@@ -288,7 +293,7 @@ JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js
 ### Verification and process
 
 Achieved so far:
-- dedicated lexer, parser, evaluator, diagnostics, bytecode, and VM tests
+- dedicated lexer, parser, evaluator, diagnostics, bytecode, VM, host API, and conformance subset tests
 - milestone companion docs in `docs/`
 - roadmap, PRD, ADR, and test-spec artifacts in `.omx/plans/`
 - ASan-friendly build path through `make test CFLAGS='... -fsanitize=address ...'`
@@ -298,13 +303,14 @@ Achieved so far:
 The project is intentionally incomplete. That is a feature, not a flaw, because the repo is optimized for learnable progression.
 
 Still outside scope today:
-- modules and multi-file execution
+- full ECMAScript module semantics beyond bounded static named imports and declaration exports
 - `extends` / `super` and the broader ES class surface beyond bounded declarations + constructor + instance methods
 - general function-object property bags beyond the narrow constructor `prototype` slot
-- async/event loop semantics
-- broad ECMAScript coercion and compatibility
-- JIT or optimization passes
-- a general-purpose embedding API
+- full async/event loop semantics beyond the bounded `defer` / `runJobs` experiment
+- full ECMAScript `RegExp` semantics beyond bounded `regexMatch`
+- broad ECMAScript coercion and compatibility beyond the repo-local conformance subset
+- native JIT / advanced optimization implementation beyond the L10 feasibility recommendation
+- advanced host integration beyond the bounded source/file embedding API
 
 The VM is also not presented as “full parity”. It is parity-tested for the current bounded surface exercised by `tests/test_vm.c` and the VM examples.
 
@@ -338,6 +344,7 @@ Run the default tree-walk backend:
 ./build/jsrt examples/arithmetic.js
 ./build/jsrt examples/functions.js
 ./build/jsrt examples/references.js
+./build/jsrt examples/modules.js
 ```
 
 Run the VM backend explicitly:
@@ -361,6 +368,7 @@ Run the main test suite:
 
 ```sh
 make test
+make conformance
 ```
 
 Run the sanitizer lane:
@@ -381,18 +389,9 @@ JSRT_BACKEND=vm ./build/jsrt examples/vm_surface.js
 
 For the authoritative milestone-by-milestone status view, see `docs/repo-milestone-status.md`.
 
-At a high level, the repo has already landed bounded forms of the earlier benchmark, object-model, constructor, class, GC, built-in, compiler, and VM milestones. The next major frontier is no longer basic language-surface work; it is the remaining long-horizon platform and experimentation work:
+At a high level, the repo has now landed bounded forms of the earlier benchmark, object-model, constructor, class, module, embedding, async experiment, regex/stdlib, conformance harness, optimization feasibility, GC, built-in, compiler, and VM milestones.
 
-```text
-L5  module system (import/export)
-L6  embeddable host API
-L7  async/event-loop experiment
-L8  regex + richer standard library
-L9  conformance subset harness
-L10 optional JIT / advanced optimization feasibility study
-```
-
-That remaining set should be read alongside the current gaps in section 9 and the detailed status ledger, rather than as a replacement for them.
+The original L5–L10 long-horizon set is closed in bounded form. Future work should be chosen from the remaining explicit gaps in section 9, the L10 optimization recommendation, or newly written milestone proposals rather than from stale roadmap ordering.
 
 ## 12. Practical reading of the docs tree
 

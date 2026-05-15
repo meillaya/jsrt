@@ -138,6 +138,33 @@ void class_method_array_free(ClassMethodArray *array) {
     array->capacity = 0;
 }
 
+void import_specifier_array_init(ImportSpecifierArray *array) {
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+void import_specifier_array_push(ImportSpecifierArray *array, ImportSpecifier specifier) {
+    if (array->count == array->capacity) {
+        size_t next_capacity = array->capacity == 0 ? 4U : array->capacity * 2U;
+        array->items = jsrt_realloc(array->items, next_capacity * sizeof(*array->items));
+        array->capacity = next_capacity;
+    }
+    array->items[array->count++] = specifier;
+}
+
+void import_specifier_array_free(ImportSpecifierArray *array) {
+    size_t i;
+    for (i = 0; i < array->count; ++i) {
+        free(array->items[i].imported_name);
+        free(array->items[i].local_name);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
 void stmt_array_init(StmtArray *array) {
     array->items = NULL;
     array->count = 0;
@@ -362,6 +389,19 @@ Stmt *ast_new_switch_stmt(Expr *expression, SwitchCaseArray cases, int line, int
     return stmt;
 }
 
+Stmt *ast_new_import_stmt(ImportSpecifierArray specifiers, const char *module_path, int line, int column) {
+    Stmt *stmt = alloc_stmt(STMT_IMPORT, line, column);
+    stmt->as.import_stmt.specifiers = specifiers;
+    stmt->as.import_stmt.module_path = jsrt_strdup(module_path);
+    return stmt;
+}
+
+Stmt *ast_new_export_stmt(Stmt *declaration, int line, int column) {
+    Stmt *stmt = alloc_stmt(STMT_EXPORT, line, column);
+    stmt->as.export_stmt.declaration = declaration;
+    return stmt;
+}
+
 Stmt *ast_new_function_stmt(const char *name, StringArray params, StmtArray body, int line, int column) {
     Stmt *stmt = alloc_stmt(STMT_FUNCTION, line, column);
     stmt->as.function.name = jsrt_strdup(name);
@@ -492,6 +532,13 @@ void stmt_destroy(Stmt *stmt) {
         case STMT_SWITCH:
             expr_destroy(stmt->as.switch_stmt.expression);
             switch_case_array_free(&stmt->as.switch_stmt.cases);
+            break;
+        case STMT_IMPORT:
+            import_specifier_array_free(&stmt->as.import_stmt.specifiers);
+            free(stmt->as.import_stmt.module_path);
+            break;
+        case STMT_EXPORT:
+            stmt_destroy(stmt->as.export_stmt.declaration);
             break;
         case STMT_FUNCTION:
             free(stmt->as.function.name);

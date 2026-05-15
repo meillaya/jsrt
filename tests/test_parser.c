@@ -169,6 +169,28 @@ void run_parser_tests(TestContext *ctx) {
     EXPECT_STRING_EQ(ctx, program.items[1]->as.class_stmt.methods.items[0].name, "value");
     stmt_array_free(&program);
 
+    program = parse_program_or_fail(ctx,
+        "import { value, renamed as localName } from \"./module.js\";\n"
+        "export const answer = value;\n"
+        "export function read() { return localName; }\n"
+        "export class Thing { get() { return answer; } }\n"
+    );
+    EXPECT_SIZE_EQ(ctx, program.count, 4U);
+    EXPECT_INT_EQ(ctx, program.items[0]->kind, STMT_IMPORT);
+    EXPECT_SIZE_EQ(ctx, program.items[0]->as.import_stmt.specifiers.count, 2U);
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.import_stmt.specifiers.items[0].imported_name, "value");
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.import_stmt.specifiers.items[0].local_name, "value");
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.import_stmt.specifiers.items[1].imported_name, "renamed");
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.import_stmt.specifiers.items[1].local_name, "localName");
+    EXPECT_STRING_EQ(ctx, program.items[0]->as.import_stmt.module_path, "./module.js");
+    EXPECT_INT_EQ(ctx, program.items[1]->kind, STMT_EXPORT);
+    EXPECT_INT_EQ(ctx, program.items[1]->as.export_stmt.declaration->kind, STMT_VAR);
+    EXPECT_INT_EQ(ctx, program.items[2]->kind, STMT_EXPORT);
+    EXPECT_INT_EQ(ctx, program.items[2]->as.export_stmt.declaration->kind, STMT_FUNCTION);
+    EXPECT_INT_EQ(ctx, program.items[3]->kind, STMT_EXPORT);
+    EXPECT_INT_EQ(ctx, program.items[3]->as.export_stmt.declaration->kind, STMT_CLASS);
+    stmt_array_free(&program);
+
     {
         TokenArray tokens;
         char *error = NULL;

@@ -42,12 +42,12 @@ Document-role boundaries:
 | L2 — Prototype chain and method dispatch | DONE | Evidence | `docs/semantics-baseline.md`; `README.md`; `src/eval.c`; `tests/test_eval.c` | Explicit prototype linkage and prototype-chain method dispatch are part of the current baseline. |
 | L3 — `this` binding and constructor semantics | DONE | Evidence | `docs/semantics-baseline.md`; `README.md`; `tests/test_eval.c`; `tests/test_vm.c` | Bounded `this`, parenthesized `new`, and constructor behavior are current support. |
 | L4 — Class syntax and desugaring/direct support | DONE | Evidence | `docs/semantics-baseline.md`; `docs/milestone-verification-checklist.md`; `examples/class_syntax.js`; `tests/test_vm.c` | Bounded class declarations are supported, and the checklist now includes a formal closure record. |
-| L5 — Module system (`import` / `export`) | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/semantics-baseline.md` | Modules/imports/exports remain explicitly unsupported. |
-| L6 — Embeddable host API | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/project-status-and-architecture.md`; `docs/built-in-library-foundation.md` | Current docs still say there is no general-purpose embedding API. |
-| L7 — Async/event-loop experiment | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/semantics-baseline.md`; `docs/project-status-and-architecture.md` | Async/event-loop behavior remains explicitly outside current scope. |
-| L8 — Regex + richer standard library | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `README.md`; `docs/built-in-library-foundation.md` | Current stdlib remains intentionally narrow and no regex support is claimed in current-state docs. |
-| L9 — Conformance subset harness | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/project-status-and-architecture.md` | The repo still treats broad compatibility work as future-facing rather than providing a conformance harness today. |
-| L10 — Optional JIT / advanced optimization feasibility study | REMAINING | Evidence | `.omx/plans/prd-javascript-runtime-roadmap.md`; `docs/project-status-and-architecture.md` | JIT/advanced optimization work remains explicitly outside current scope. |
+| L5 — Module system (`import` / `export`) | DONE | Evidence | `docs/module-system.md`; `docs/semantics-baseline.md`; `README.md`; `examples/modules.js`; `tests/test_eval.c`; `tests/test_parser.c`; `tests/test_lexer.c` | Bounded static named imports and declaration exports are supported on the tree-walk backend; VM module lowering remains explicitly deferred. |
+| L6 — Embeddable host API | DONE | Evidence | `docs/embeddable-host-api.md`; `include/jsrt/runtime.h`; `src/runtime.c`; `tests/test_runtime.c`; `examples/embed_host.c` | A bounded source/file evaluation C API exists with documented lifecycle, result ownership, and diagnostics; advanced host callbacks/value handles remain deferred. |
+| L7 — Async/event-loop experiment | DONE | Evidence | `docs/async-event-loop-experiment.md`; `docs/semantics-baseline.md`; `src/eval.c`; `tests/test_eval.c` | A bounded deferred-callback job queue experiment exists through `defer` / `runJobs`; promises, async/await, timers, and I/O remain deferred. |
+| L8 — Regex + richer standard library | DONE | Evidence | `docs/regex-and-stdlib.md`; `docs/semantics-baseline.md`; `src/eval.c`; `tests/test_eval.c`; `README.md` | Bounded dependency-free `regexMatch` plus `strContains`/`strSlice` are supported; ECMAScript `RegExp` remains deferred. |
+| L9 — Conformance subset harness | DONE | Evidence | `docs/conformance-subset-harness.md`; `conformance/manifest.csv`; `scripts/conformance.sh`; `Makefile` | A repo-local positive/negative conformance subset harness exists with tree/VM applicability; broad Test262 compatibility remains out of scope. |
+| L10 — Optional JIT / advanced optimization feasibility study | DONE | Evidence | `docs/optimization-feasibility-study.md`; `.omx/plans/adr-javascript-runtime-l10-optimization-feasibility.md`; `docs/semantics-baseline.md` | Feasibility study closes L10 with a recommendation to defer native JIT and pursue bytecode peephole/constant-folding experiments first. |
 
 ## DONE milestone closure provenance
 
@@ -67,6 +67,12 @@ These milestones have a repo-local artifact that directly records completion or 
 | M1 — GC observability and stress rig | `docs/milestone-verification-checklist.md` | Contains the **M1 closure record — 2026-04-23** with retained debug-build/trace/stress evidence for the bounded M1 surface. |
 | L1 — Benchmark and profiling harness | `docs/milestone-verification-checklist.md` | Contains the **L1 closure record — 2026-04-23** with retained harness/smoke/live-schema evidence for the bounded L1 workflow. |
 | L4 — Class syntax and desugaring/direct support | `docs/milestone-verification-checklist.md` | Contains the **L4 closure record — 2026-04-23** with retained evidence and checked exit gates. |
+| L5 — Module system (`import` / `export`) | `docs/milestone-verification-checklist.md` | Contains the **L5 closure record — 2026-05-15** with retained lexer/parser/evaluator/module-example evidence for the bounded tree-walk module surface. |
+| L6 — Embeddable host API | `docs/milestone-verification-checklist.md` | Contains the **L6 closure record — 2026-05-15** with retained runtime API/source/file/module/diagnostic evidence. |
+| L7 — Async/event-loop experiment | `docs/milestone-verification-checklist.md` | Contains the **L7 closure record — 2026-05-15** with retained deferred-callback/job-queue evidence. |
+| L8 — Regex + richer standard library | `docs/milestone-verification-checklist.md` | Contains the **L8 closure record — 2026-05-15** with retained regex/string built-in evidence. |
+| L9 — Conformance subset harness | `docs/milestone-verification-checklist.md` | Contains the **L9 closure record — 2026-05-15** with retained manifest/script/Make target evidence. |
+| L10 — Optional JIT / advanced optimization feasibility study | `docs/milestone-verification-checklist.md` | Contains the **L10 closure record — 2026-05-15** with retained feasibility/ADR evidence. |
 
 ### DONE rows backed by current-state synthesis instead of a single closure artifact
 

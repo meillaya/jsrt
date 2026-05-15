@@ -65,6 +65,17 @@ typedef struct {
     size_t capacity;
 } ClassMethodArray;
 
+typedef struct {
+    char *imported_name;
+    char *local_name;
+} ImportSpecifier;
+
+typedef struct {
+    ImportSpecifier *items;
+    size_t count;
+    size_t capacity;
+} ImportSpecifierArray;
+
 typedef enum {
     LITERAL_NUMBER,
     LITERAL_BOOL,
@@ -162,6 +173,8 @@ typedef enum {
     STMT_FOR,
     STMT_WHILE,
     STMT_SWITCH,
+    STMT_IMPORT,
+    STMT_EXPORT,
     STMT_FUNCTION,
     STMT_CLASS,
     STMT_RETURN,
@@ -209,6 +222,13 @@ struct Stmt {
             SwitchCaseArray cases;
         } switch_stmt;
         struct {
+            ImportSpecifierArray specifiers;
+            char *module_path;
+        } import_stmt;
+        struct {
+            Stmt *declaration;
+        } export_stmt;
+        struct {
             char *name;
             StringArray params;
             StmtArray body;
@@ -243,6 +263,10 @@ void class_method_array_init(ClassMethodArray *array);
 void class_method_array_push(ClassMethodArray *array, ClassMethod method);
 void class_method_array_free(ClassMethodArray *array);
 
+void import_specifier_array_init(ImportSpecifierArray *array);
+void import_specifier_array_push(ImportSpecifierArray *array, ImportSpecifier specifier);
+void import_specifier_array_free(ImportSpecifierArray *array);
+
 void stmt_array_init(StmtArray *array);
 void stmt_array_push(StmtArray *array, Stmt *stmt);
 void stmt_array_free(StmtArray *array);
@@ -273,6 +297,8 @@ Stmt *ast_new_do_while_stmt(Stmt *body, Expr *condition, int line, int column);
 Stmt *ast_new_for_stmt(Stmt *init, Expr *condition, Expr *increment, Stmt *body, int line, int column);
 Stmt *ast_new_while_stmt(Expr *condition, Stmt *body, int line, int column);
 Stmt *ast_new_switch_stmt(Expr *expression, SwitchCaseArray cases, int line, int column);
+Stmt *ast_new_import_stmt(ImportSpecifierArray specifiers, const char *module_path, int line, int column);
+Stmt *ast_new_export_stmt(Stmt *declaration, int line, int column);
 Stmt *ast_new_function_stmt(const char *name, StringArray params, StmtArray body, int line, int column);
 Stmt *ast_new_class_stmt(const char *name, ClassMethodArray methods, int line, int column);
 Stmt *ast_new_return_stmt(Expr *value, int line, int column);

@@ -8,20 +8,85 @@
 
 #include "jsrt/diagnostics.h"
 #include "jsrt/gc.h"
+#include "jsrt/lexer.h"
 #include "jsrt/memory.h"
+#include "jsrt/parser.h"
 
 typedef struct ActiveEnvScope {
     Env *env;
     struct ActiveEnvScope *previous;
 } ActiveEnvScope;
 
+typedef struct ModuleRecord {
+    char *path;
+    char *source;
+    TokenArray tokens;
+    StmtArray program;
+    Env *env;
+    StringArray exports;
+    bool lexed;
+    bool parsed;
+    bool loading;
+    struct ModuleRecord *next;
+} ModuleRecord;
+
+typedef struct {
+    Value *items;
+    size_t count;
+    size_t capacity;
+} JobQueue;
+
 typedef struct {
     const char *source;
+    const char *module_path;
     Env *env;
+    Env *root_env;
+    StringArray *exports;
+    JobQueue *jobs;
     ActiveEnvScope *active_envs;
     int loop_depth;
     int switch_depth;
 } Evaluator;
+
+static ModuleRecord *module_records = NULL;
+static int eval_execution_depth = 0;
+
+static void job_queue_init(JobQueue *queue) {
+    queue->items = NULL;
+    queue->count = 0;
+    queue->capacity = 0;
+}
+
+static void job_queue_push(JobQueue *queue, Value callback) {
+    if (queue->count == queue->capacity) {
+        size_t next_capacity = queue->capacity == 0 ? 4U : queue->capacity * 2U;
+        queue->items = jsrt_realloc(queue->items, next_capacity * sizeof(*queue->items));
+        queue->capacity = next_capacity;
+    }
+    queue->items[queue->count++] = value_clone(callback);
+}
+
+static Value job_queue_pop_front(JobQueue *queue) {
+    Value value = queue->items[0];
+    size_t i;
+
+    for (i = 1; i < queue->count; ++i) {
+        queue->items[i - 1U] = queue->items[i];
+    }
+    queue->count -= 1U;
+    return value;
+}
+
+static void job_queue_free(JobQueue *queue) {
+    size_t i;
+    for (i = 0; i < queue->count; ++i) {
+        value_free(queue->items[i]);
+    }
+    free(queue->items);
+    queue->items = NULL;
+    queue->count = 0;
+    queue->capacity = 0;
+}
 
 typedef enum {
     ASSIGN_STEP_PROPERTY,
@@ -48,7 +113,12 @@ typedef enum {
     BUILTIN_PRINT,
     BUILTIN_LEN,
     BUILTIN_TYPEOF,
-    BUILTIN_SET_PROTOTYPE_OF
+    BUILTIN_SET_PROTOTYPE_OF,
+    BUILTIN_DEFER,
+    BUILTIN_RUN_JOBS,
+    BUILTIN_STR_CONTAINS,
+    BUILTIN_STR_SLICE,
+    BUILTIN_REGEX_MATCH
 } BuiltinKind;
 
 static const StringArray EMPTY_PARAMS = {NULL, 0U, 0U};
@@ -102,6 +172,114 @@ static EvalResult result_error(char *message) {
     return result;
 }
 
+static char *read_module_file(const char *path) {
+    FILE *file = fopen(path, "rb");
+    long size;
+    size_t read_count;
+    char *buffer;
+
+    if (file == NULL) {
+        return NULL;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return NULL;
+    }
+    size = ftell(file);
+    if (size < 0) {
+        fclose(file);
+        return NULL;
+    }
+    rewind(file);
+    buffer = jsrt_malloc((size_t)size + 1U);
+    read_count = fread(buffer, 1U, (size_t)size, file);
+    buffer[read_count] = '\0';
+    fclose(file);
+    return buffer;
+}
+
+static char *module_dirname(const char *path) {
+    const char *slash;
+
+    if (path == NULL || path[0] == '\0') {
+        return jsrt_strdup(".");
+    }
+    slash = strrchr(path, '/');
+    if (slash == NULL) {
+        return jsrt_strdup(".");
+    }
+    if (slash == path) {
+        return jsrt_strdup("/");
+    }
+    {
+        size_t length = (size_t)(slash - path);
+        char *dir = jsrt_malloc(length + 1U);
+        memcpy(dir, path, length);
+        dir[length] = '\0';
+        return dir;
+    }
+}
+
+static char *resolve_module_path(const char *base_path, const char *specifier) {
+    char *candidate;
+
+    if (specifier[0] == '/') {
+        candidate = jsrt_strdup(specifier);
+    } else {
+        char *dir = module_dirname(base_path);
+        candidate = jsrt_format("%s/%s", dir, specifier);
+        free(dir);
+    }
+    return candidate;
+}
+
+static ModuleRecord *module_record_find(const char *path) {
+    ModuleRecord *record = module_records;
+    while (record != NULL) {
+        if (strcmp(record->path, path) == 0) {
+            return record;
+        }
+        record = record->next;
+    }
+    return NULL;
+}
+
+static ModuleRecord *module_record_create(const char *path, char *source) {
+    ModuleRecord *record = jsrt_malloc(sizeof(*record));
+    record->path = jsrt_strdup(path);
+    record->source = source;
+    token_array_init(&record->tokens);
+    stmt_array_init(&record->program);
+    record->env = env_create(NULL);
+    string_array_init(&record->exports);
+    record->lexed = false;
+    record->parsed = false;
+    record->loading = true;
+    record->next = module_records;
+    module_records = record;
+    return record;
+}
+
+static void module_records_free_all(void) {
+    ModuleRecord *record = module_records;
+
+    while (record != NULL) {
+        ModuleRecord *next = record->next;
+        if (record->parsed) {
+            stmt_array_free(&record->program);
+        }
+        if (record->lexed) {
+            token_array_free(&record->tokens);
+        }
+        string_array_free(&record->exports);
+        free(record->source);
+        free(record->path);
+        free(record);
+        record = next;
+    }
+    module_records = NULL;
+}
+
 static EvalResult result_runtime_error_at(
     Evaluator *evaluator,
     RuntimeErrorKind kind,
@@ -140,6 +318,9 @@ void eval_result_free(EvalResult *result) {
     if (result == NULL) {
         return;
     }
+    if (eval_execution_depth == 0) {
+        module_records_free_all();
+    }
     free(result->error_message);
     result->error_message = NULL;
     result->runtime_error_kind = RUNTIME_ERROR_NONE;
@@ -158,6 +339,21 @@ static bool ensure_number(Evaluator *evaluator, Value value, const Expr *expr, c
 
 static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr);
 static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt);
+static EvalResult invoke_function(
+    Evaluator *evaluator,
+    const Expr *surface_expr,
+    Value callee_value,
+    Value receiver_value,
+    const ExprArray *arguments_expr,
+    bool is_constructor
+);
+static EvalResult eval_program_internal(
+    const StmtArray *program,
+    const char *source,
+    Env *env,
+    const char *module_path,
+    StringArray *exports
+);
 static ptrdiff_t object_find_key(const JsObject *object, const char *key);
 static void object_set_key(JsObject *object, const char *key, Value value);
 static bool object_lookup_key(JsObject *object, const char *key, JsObject **owner, ptrdiff_t *index);
@@ -272,6 +468,48 @@ static const char *value_type_name(Value value) {
 
 static bool value_is_object_like(Value value) {
     return value.type == VALUE_OBJECT || value.type == VALUE_ARRAY || value.type == VALUE_FUNCTION;
+}
+
+static bool regex_match_here(const char *pattern, const char *text);
+
+static bool regex_match_star(int c, const char *pattern, const char *text) {
+    const char *cursor = text;
+
+    do {
+        if (regex_match_here(pattern, cursor)) {
+            return true;
+        }
+    } while (*cursor != '\0' && (*cursor++ == c || c == '.'));
+
+    return false;
+}
+
+static bool regex_match_here(const char *pattern, const char *text) {
+    if (pattern[0] == '\0') {
+        return true;
+    }
+    if (pattern[1] == '*') {
+        return regex_match_star(pattern[0], pattern + 2, text);
+    }
+    if (pattern[0] == '$' && pattern[1] == '\0') {
+        return *text == '\0';
+    }
+    if (*text != '\0' && (pattern[0] == '.' || pattern[0] == *text)) {
+        return regex_match_here(pattern + 1, text + 1);
+    }
+    return false;
+}
+
+static bool regex_match_bounded(const char *pattern, const char *text) {
+    if (pattern[0] == '^') {
+        return regex_match_here(pattern + 1, text);
+    }
+    do {
+        if (regex_match_here(pattern, text)) {
+            return true;
+        }
+    } while (*text++ != '\0');
+    return false;
 }
 
 static bool function_property_is_prototype(const char *name) {
@@ -617,6 +855,97 @@ static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, c
             receiver->prototype = arguments[1].type == VALUE_OBJECT ? arguments[1].as.object : NULL;
             return result_ok(value_clone(arguments[0]));
         }
+        case BUILTIN_DEFER:
+            if (arguments[0].type != VALUE_FUNCTION || arguments[0].as.function == NULL) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "defer() expects a function callback"
+                );
+            }
+            job_queue_push(evaluator->jobs, arguments[0]);
+            return result_ok(value_null());
+        case BUILTIN_RUN_JOBS: {
+            ExprArray empty_arguments = {NULL, 0U, 0U};
+            while (evaluator->jobs != NULL && evaluator->jobs->count > 0U) {
+                Value callback = job_queue_pop_front(evaluator->jobs);
+                EvalResult callback_result = invoke_function(
+                    evaluator,
+                    expr,
+                    callback,
+                    value_null(),
+                    &empty_arguments,
+                    false
+                );
+                value_free(callback);
+                if (callback_result.had_error) {
+                    return callback_result;
+                }
+                value_free(callback_result.value);
+            }
+            return result_ok(value_null());
+        }
+        case BUILTIN_STR_CONTAINS:
+            if (arguments[0].type != VALUE_STRING || arguments[1].type != VALUE_STRING) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "strContains() expects two strings"
+                );
+            }
+            return result_ok(value_bool(strstr(arguments[0].as.string, arguments[1].as.string) != NULL));
+        case BUILTIN_STR_SLICE: {
+            size_t length;
+            size_t start;
+            size_t end;
+            char *slice;
+            if (arguments[0].type != VALUE_STRING || arguments[1].type != VALUE_NUMBER || arguments[2].type != VALUE_NUMBER) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "strSlice() expects a string and numeric start/end"
+                );
+            }
+            length = strlen(arguments[0].as.string);
+            start = (size_t)arguments[1].as.number;
+            end = (size_t)arguments[2].as.number;
+            if ((double)start != arguments[1].as.number || (double)end != arguments[2].as.number ||
+                start > end || end > length) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_INDEX,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "strSlice() range is out of bounds"
+                );
+            }
+            slice = jsrt_malloc(end - start + 1U);
+            memcpy(slice, arguments[0].as.string + start, end - start);
+            slice[end - start] = '\0';
+            return result_ok(value_string_take(slice));
+        }
+        case BUILTIN_REGEX_MATCH:
+            if (arguments[0].type != VALUE_STRING || arguments[1].type != VALUE_STRING) {
+                return result_runtime_error_at(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    "regexMatch() expects text and pattern strings"
+                );
+            }
+            return result_ok(value_bool(regex_match_bounded(arguments[1].as.string, arguments[0].as.string)));
     }
 
     return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported builtin function");
@@ -633,6 +962,11 @@ static void define_global_builtins(Env *env) {
     define_builtin(env, "len", 1U, BUILTIN_LEN);
     define_builtin(env, "typeOf", 1U, BUILTIN_TYPEOF);
     define_builtin(env, "setPrototypeOf", 2U, BUILTIN_SET_PROTOTYPE_OF);
+    define_builtin(env, "defer", 1U, BUILTIN_DEFER);
+    define_builtin(env, "runJobs", 0U, BUILTIN_RUN_JOBS);
+    define_builtin(env, "strContains", 2U, BUILTIN_STR_CONTAINS);
+    define_builtin(env, "strSlice", 3U, BUILTIN_STR_SLICE);
+    define_builtin(env, "regexMatch", 2U, BUILTIN_REGEX_MATCH);
 }
 
 static EvalResult execute_switch(Evaluator *evaluator, const Stmt *stmt) {
@@ -1114,7 +1448,9 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
 static void collect_garbage(Evaluator *evaluator, const Value *root_value) {
     ActiveEnvScope *scope = evaluator->active_envs != NULL ? evaluator->active_envs->previous : NULL;
     GcTempRoot *active_roots = NULL;
+    GcTempRoot *job_roots = NULL;
     size_t root_count = 0;
+    size_t job_count = evaluator->jobs != NULL ? evaluator->jobs->count : 0U;
     size_t i;
 
     while (scope != NULL) {
@@ -1129,10 +1465,20 @@ static void collect_garbage(Evaluator *evaluator, const Value *root_value) {
             scope = scope->previous;
         }
     }
+    if (job_count > 0) {
+        job_roots = jsrt_malloc(sizeof(*job_roots) * job_count);
+        for (i = 0; i < job_count; ++i) {
+            gc_temp_root_push_value(&job_roots[i], &evaluator->jobs->items[i]);
+        }
+    }
     gc_collect_with_reason(evaluator->env, root_value, "eval-safe-point");
+    for (i = job_count; i > 0; --i) {
+        gc_temp_root_pop(&job_roots[i - 1U]);
+    }
     for (i = root_count; i > 0; --i) {
         gc_temp_root_pop(&active_roots[i - 1U]);
     }
+    free(job_roots);
     free(active_roots);
 }
 
@@ -1770,6 +2116,226 @@ static EvalResult eval_expression(Evaluator *evaluator, const Expr *expr) {
     return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported expression kind");
 }
 
+static bool string_array_contains(const StringArray *array, const char *value) {
+    size_t i;
+    for (i = 0; i < array->count; ++i) {
+        if (strcmp(array->items[i], value) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static const char *export_declaration_name(const Stmt *declaration) {
+    switch (declaration->kind) {
+        case STMT_VAR:
+            return declaration->as.var.name;
+        case STMT_FUNCTION:
+            return declaration->as.function.name;
+        case STMT_CLASS:
+            return declaration->as.class_stmt.name;
+        default:
+            return NULL;
+    }
+}
+
+static EvalResult execute_export_statement(Evaluator *evaluator, const Stmt *stmt) {
+    const char *name = export_declaration_name(stmt->as.export_stmt.declaration);
+    EvalResult result;
+
+    if (evaluator->exports == NULL) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_CONTROL_FLOW,
+            stmt->line,
+            stmt->column,
+            6,
+            "export declarations require module evaluation"
+        );
+    }
+    if (evaluator->env != evaluator->root_env) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_CONTROL_FLOW,
+            stmt->line,
+            stmt->column,
+            6,
+            "export declarations are only supported at module top level"
+        );
+    }
+    if (name == NULL) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_INTERNAL,
+            stmt->line,
+            stmt->column,
+            6,
+            "unsupported export declaration"
+        );
+    }
+
+    result = execute_statement(evaluator, stmt->as.export_stmt.declaration);
+    if (result.had_error) {
+        return result;
+    }
+    if (!string_array_contains(evaluator->exports, name)) {
+        string_array_push(evaluator->exports, jsrt_strdup(name));
+    }
+    return result;
+}
+
+static EvalResult load_module_record(Evaluator *evaluator, const Stmt *import_stmt, const char *specifier, ModuleRecord **out_record) {
+    char *resolved = resolve_module_path(evaluator->module_path, specifier);
+    ModuleRecord *record = module_record_find(resolved);
+
+    if (record != NULL) {
+        if (record->loading) {
+            EvalResult error = result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_INTERNAL,
+                import_stmt->line,
+                import_stmt->column,
+                6,
+                jsrt_format("cyclic module import is unsupported: %s", specifier)
+            );
+            free(resolved);
+            return error;
+        }
+        *out_record = record;
+        free(resolved);
+        return result_ok(value_null());
+    }
+
+    {
+        char *source = read_module_file(resolved);
+        char *error = NULL;
+        EvalResult module_result;
+
+        if (source == NULL) {
+            EvalResult load_error = result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_LOOKUP,
+                import_stmt->line,
+                import_stmt->column,
+                6,
+                jsrt_format("unable to read module '%s'", specifier)
+            );
+            free(resolved);
+            return load_error;
+        }
+
+        record = module_record_create(resolved, source);
+        free(resolved);
+
+        if (!lex_source(record->source, &record->tokens, &error)) {
+            record->loading = false;
+            module_result = result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_INTERNAL,
+                import_stmt->line,
+                import_stmt->column,
+                6,
+                jsrt_format("module lex error: %s", error != NULL ? error : "unknown error")
+            );
+            free(error);
+            return module_result;
+        }
+        record->lexed = true;
+
+        if (!parse_tokens(&record->tokens, record->source, &record->program, &error)) {
+            record->loading = false;
+            module_result = result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_INTERNAL,
+                import_stmt->line,
+                import_stmt->column,
+                6,
+                jsrt_format("module parse error: %s", error != NULL ? error : "unknown error")
+            );
+            free(error);
+            return module_result;
+        }
+        record->parsed = true;
+
+        {
+            GcTempRoot importer_root;
+            gc_temp_root_push_env(&importer_root, evaluator->root_env);
+            module_result = eval_program_internal(&record->program, record->source, record->env, record->path, &record->exports);
+            gc_temp_root_pop(&importer_root);
+        }
+        record->loading = false;
+        if (module_result.had_error) {
+            return module_result;
+        }
+        value_free(module_result.value);
+        *out_record = record;
+        return result_ok(value_null());
+    }
+}
+
+static EvalResult execute_import_statement(Evaluator *evaluator, const Stmt *stmt) {
+    ModuleRecord *record = NULL;
+    EvalResult load_result;
+    size_t i;
+
+    if (evaluator->env != evaluator->root_env) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_CONTROL_FLOW,
+            stmt->line,
+            stmt->column,
+            6,
+            "import declarations are only supported at module top level"
+        );
+    }
+
+    load_result = load_module_record(evaluator, stmt, stmt->as.import_stmt.module_path, &record);
+    if (load_result.had_error) {
+        return load_result;
+    }
+    value_free(load_result.value);
+
+    for (i = 0; i < stmt->as.import_stmt.specifiers.count; ++i) {
+        const ImportSpecifier *specifier = &stmt->as.import_stmt.specifiers.items[i];
+        Value imported_value;
+
+        if (!string_array_contains(&record->exports, specifier->imported_name)) {
+            return result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_LOOKUP,
+                stmt->line,
+                stmt->column,
+                6,
+                jsrt_format("module '%s' does not export '%s'", stmt->as.import_stmt.module_path, specifier->imported_name)
+            );
+        }
+        if (!env_get(record->env, specifier->imported_name, &imported_value)) {
+            return result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_LOOKUP,
+                stmt->line,
+                stmt->column,
+                6,
+                jsrt_format("module export '%s' is unavailable", specifier->imported_name)
+            );
+        }
+        if (!env_define(evaluator->env, specifier->local_name, imported_value, true)) {
+            value_free(imported_value);
+            return result_runtime_error_at_take(
+                evaluator,
+                RUNTIME_ERROR_NAME,
+                stmt->line,
+                stmt->column,
+                (int)strlen(specifier->local_name),
+                jsrt_format("redeclaration of '%s' in the same scope", specifier->local_name)
+            );
+        }
+        value_free(imported_value);
+    }
+
+    return result_ok(value_null());
+}
+
 static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
     switch (stmt->kind) {
         case STMT_EXPR:
@@ -1848,6 +2414,10 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
         }
         case STMT_SWITCH:
             return execute_switch(evaluator, stmt);
+        case STMT_IMPORT:
+            return execute_import_statement(evaluator, stmt);
+        case STMT_EXPORT:
+            return execute_export_statement(evaluator, stmt);
         case STMT_FOR: {
             Env *previous_env = evaluator->env;
             ActiveEnvScope active_scope;
@@ -2096,32 +2666,49 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
     return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, stmt->line, stmt->column, 1, "unsupported statement kind");
 }
 
-EvalResult eval_program(const StmtArray *program, const char *source, Env *env) {
+static EvalResult eval_program_internal(
+    const StmtArray *program,
+    const char *source,
+    Env *env,
+    const char *module_path,
+    StringArray *exports
+) {
     ActiveEnvScope active_scope;
     Evaluator evaluator;
+    JobQueue jobs;
     EvalResult result = result_ok(value_null());
     size_t i;
 
+    job_queue_init(&jobs);
     active_scope.env = env;
     active_scope.previous = NULL;
     evaluator.source = source;
+    evaluator.module_path = module_path;
     evaluator.env = env;
+    evaluator.root_env = env;
+    evaluator.exports = exports;
+    evaluator.jobs = &jobs;
     evaluator.active_envs = &active_scope;
     evaluator.loop_depth = 0;
     evaluator.switch_depth = 0;
     define_global_builtins(env);
     env_set_this(env, value_null());
 
+    eval_execution_depth += 1;
     for (i = 0; i < program->count; ++i) {
         value_free(result.value);
         result.value = value_null();
         collect_garbage(&evaluator, NULL);
         result = execute_statement(&evaluator, program->items[i]);
         if (result.had_error) {
+            eval_execution_depth -= 1;
+            job_queue_free(&jobs);
             return result;
         }
         if (result.is_return) {
             value_free(result.value);
+            eval_execution_depth -= 1;
+            job_queue_free(&jobs);
             return result_runtime_error_at(
                 &evaluator,
                 RUNTIME_ERROR_CONTROL_FLOW,
@@ -2132,5 +2719,21 @@ EvalResult eval_program(const StmtArray *program, const char *source, Env *env) 
             );
         }
     }
+    eval_execution_depth -= 1;
+    job_queue_free(&jobs);
     return result;
+}
+
+EvalResult eval_program_with_path(const StmtArray *program, const char *source, Env *env, const char *module_path) {
+    StringArray exports;
+    EvalResult result;
+
+    string_array_init(&exports);
+    result = eval_program_internal(program, source, env, module_path, &exports);
+    string_array_free(&exports);
+    return result;
+}
+
+EvalResult eval_program(const StmtArray *program, const char *source, Env *env) {
+    return eval_program_with_path(program, source, env, NULL);
 }

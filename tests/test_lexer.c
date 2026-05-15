@@ -79,6 +79,16 @@ void run_lexer_tests(TestContext *ctx) {
     EXPECT_INT_EQ(ctx, tokens.items[9].type, TOKEN_SUPER);
     token_array_free(&tokens);
 
+    EXPECT_TRUE(ctx, lex_source("import { value as local } from \"./m.js\"; export const out = local;", &tokens, &error));
+    if (error != NULL) {
+        free(error);
+    }
+    EXPECT_INT_EQ(ctx, tokens.items[0].type, TOKEN_IMPORT);
+    EXPECT_INT_EQ(ctx, tokens.items[3].type, TOKEN_AS);
+    EXPECT_INT_EQ(ctx, tokens.items[6].type, TOKEN_FROM);
+    EXPECT_INT_EQ(ctx, tokens.items[9].type, TOKEN_EXPORT);
+    token_array_free(&tokens);
+
     EXPECT_FALSE(ctx, lex_source("let x = @;", &tokens, &error));
     EXPECT_TRUE(ctx, error != NULL);
     EXPECT_TRUE(ctx, strstr(error, "^") != NULL);

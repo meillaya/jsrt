@@ -58,6 +58,62 @@ static EvalResult evaluate_source(const char *source, char **parse_error) {
     return result;
 }
 
+static EvalResult evaluate_source_with_path(const char *source, const char *module_path, char **parse_error) {
+    TokenArray tokens;
+    StmtArray program;
+    Env *env;
+    EvalResult result;
+
+    *parse_error = NULL;
+    if (!lex_source(source, &tokens, parse_error)) {
+        EvalResult failure;
+        failure.had_error = true;
+        failure.is_return = false;
+        failure.is_break = false;
+        failure.is_continue = false;
+        failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
+        failure.error_message = *parse_error;
+        return failure;
+    }
+
+    if (!parse_tokens(&tokens, source, &program, parse_error)) {
+        EvalResult failure;
+        token_array_free(&tokens);
+        failure.had_error = true;
+        failure.is_return = false;
+        failure.is_break = false;
+        failure.is_continue = false;
+        failure.value = value_null();
+        failure.runtime_error_kind = RUNTIME_ERROR_NONE;
+        failure.error_line = 0;
+        failure.error_column = 0;
+        failure.error_width = 0;
+        failure.error_message = *parse_error;
+        return failure;
+    }
+
+    env = env_create(NULL);
+    result = eval_program_with_path(&program, source, env, module_path);
+    env_destroy(env);
+    gc_collect_with_reason(NULL, result.had_error ? NULL : &result.value, "test-result-cleanup");
+    stmt_array_free(&program);
+    token_array_free(&tokens);
+    return result;
+}
+
+static void write_test_file(TestContext *ctx, const char *path, const char *source) {
+    FILE *file = fopen(path, "w");
+    EXPECT_TRUE(ctx, file != NULL);
+    if (file != NULL) {
+        fputs(source, file);
+        fclose(file);
+    }
+}
+
 static void assert_example_output(TestContext *ctx, const char *path, const char *expected_output) {
     char command[256];
     FILE *file;
@@ -280,6 +336,82 @@ void run_eval_tests(TestContext *ctx) {
     EXPECT_FALSE(ctx, result.had_error);
     EXPECT_INT_EQ(ctx, result.value.type, VALUE_STRING);
     EXPECT_STRING_EQ(ctx, result.value.as.string, "function");
+    value_free(result.value);
+    eval_result_free(&result);
+
+    write_test_file(ctx,
+        "build/module_l5_lib.js",
+        "export const base = 40;\n"
+        "export function add(n) { return base + n; }\n"
+        "const hidden = 3;\n"
+    );
+    result = evaluate_source_with_path(
+        "import { base, add as plus } from \"./module_l5_lib.js\";\n"
+        "plus(2) + base;\n",
+        "build/module_l5_main.js",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 82.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source_with_path(
+        "import { hidden } from \"./module_l5_lib.js\";\n"
+        "hidden;\n",
+        "build/module_l5_main.js",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "does not export 'hidden'") != NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let value = 1;\n"
+        "defer(function () { value = value + 2; });\n"
+        "defer(function () { value = value * 10; });\n"
+        "let before = value;\n"
+        "runJobs();\n"
+        "before + value;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 31.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("defer(1);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "defer() expects a function callback") != NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "strContains(\"javascript runtime\", \"script\") &&\n"
+        "strSlice(\"runtime\", 1, 4) == \"unt\" &&\n"
+        "regexMatch(\"abc123\", \"^abc.*$\") &&\n"
+        "regexMatch(\"abc123\", \"123$\") &&\n"
+        "!regexMatch(\"abc\", \"^z\");\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("strSlice(\"abc\", 2, 1);\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "strSlice() range is out of bounds") != NULL);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("regexMatch(1, \".\");\n", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "regexMatch() expects text and pattern strings") != NULL);
     value_free(result.value);
     eval_result_free(&result);
 
@@ -962,7 +1094,7 @@ void run_eval_tests(TestContext *ctx) {
         EXPECT_FALSE(ctx, result.had_error);
         EXPECT_INT_EQ(ctx, result.value.type, VALUE_NUMBER);
         EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 5.0);
-        EXPECT_SIZE_EQ(ctx, gc_live_function_count(), 4U);
+        EXPECT_SIZE_EQ(ctx, gc_live_function_count(), 9U);
         EXPECT_SIZE_EQ(ctx, gc_live_env_count(), 1U);
 
         value_free(result.value);

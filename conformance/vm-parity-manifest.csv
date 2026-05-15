@@ -1,0 +1,8 @@
+id,path
+arithmetic,examples/arithmetic.js
+arrays-objects,examples/arrays_objects.js
+branching,examples/branching.js
+for-loops,examples/for_loops.js
+class-syntax,examples/class_syntax.js
+vm-subset,examples/vm_subset.js
+vm-surface,examples/vm_surface.js

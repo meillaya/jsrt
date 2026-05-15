@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
         result = vm_execute_program(&bytecode, source);
     } else {
         env = env_create(NULL);
-        result = eval_program(&program, source, env);
+        result = eval_program_with_path(&program, source, env, argv[1]);
     }
     if (result.had_error) {
         fprintf(stderr, "%s\n", result.error_message);
