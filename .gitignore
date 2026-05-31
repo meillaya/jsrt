@@ -2,8 +2,4 @@ build/
 build-asan/
 .zig-cache/
 zig-out/
-.omx/*
-!.omx/plans/
-!.omx/plans/**
-!.omx/specs/
-!.omx/specs/**
+.omx/
