@@ -179,7 +179,7 @@ void run_diagnostics_tests(TestContext *ctx) {
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:11: extends is unsupported in L4 classes\n"
+        "Parser error at 1:11: extends is unsupported in jsrt class declarations\n"
         "class Box extends Base {}\n"
         "          ^^^^^^^"
     );
@@ -190,7 +190,7 @@ void run_diagnostics_tests(TestContext *ctx) {
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:13: static class members are unsupported in L4\n"
+        "Parser error at 1:13: static class members are unsupported in jsrt class declarations\n"
         "class Box { static foo() {} }\n"
         "            ^^^^^^\n\n"
         "Parser error at 1:29: expected expression\n"
@@ -204,7 +204,7 @@ void run_diagnostics_tests(TestContext *ctx) {
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:29: super is unsupported in L4 classes\n"
+        "Parser error at 1:29: super is unsupported in jsrt class declarations\n"
         "class Box { constructor() { super(); } }\n"
         "                            ^^^^^\n\n"
         "Parser error at 1:41: expected '}' after class body\n"
@@ -218,7 +218,7 @@ void run_diagnostics_tests(TestContext *ctx) {
     EXPECT_STRING_EQ(
         ctx,
         error,
-        "Parser error at 1:11: class expressions are unsupported in L4\n"
+        "Parser error at 1:11: class expressions are unsupported in jsrt class declarations\n"
         "let Box = class {};\n"
         "          ^^^^^\n\n"
         "Parser error at 1:19: expected expression\n"
@@ -294,7 +294,7 @@ void run_diagnostics_tests(TestContext *ctx) {
         EXPECT_STRING_EQ(
             ctx,
             result.error_message,
-            "Runtime error [type] at 2:5: only function.prototype is supported in L3\n"
+            "Runtime error [type] at 2:5: only function.prototype is supported for constructor/prototype behavior\n"
             "Ctor.x;\n"
             "    ^"
         );
@@ -322,7 +322,7 @@ void run_diagnostics_tests(TestContext *ctx) {
         EXPECT_STRING_EQ(
             ctx,
             result.error_message,
-            "Runtime error [type] at 2:5: only function.prototype is supported in L3\n"
+            "Runtime error [type] at 2:5: only function.prototype is supported for constructor/prototype behavior\n"
             "Ctor.x = 1;\n"
             "    ^"
         );

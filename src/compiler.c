@@ -1136,7 +1136,7 @@ static bool compile_statement(Compiler *compiler, const Stmt *stmt, char **error
                 stmt->line,
                 stmt->column,
                 6,
-                "modules are supported by the tree-walk backend only in L5; unset JSRT_BACKEND=vm",
+                "modules are supported by the tree-walk module evaluator only; unset JSRT_BACKEND=vm",
                 error_message
             );
         case STMT_FUNCTION: {

@@ -490,14 +490,14 @@ void run_vm_tests(TestContext *ctx) {
         "class Box {}\n",
         "redeclaration of 'Box' in the same scope"
     );
-    assert_backend_error_contains(ctx, "class Box extends Base {}\n", "extends is unsupported in L4 classes");
-    assert_backend_error_contains(ctx, "class Box { super(); }\n", "super is unsupported in L4 classes");
-    assert_backend_error_contains(ctx, "class Box { static foo() {} }\n", "static class members are unsupported in L4");
-    assert_backend_error_contains(ctx, "class Box { get value() {} }\n", "getter syntax is unsupported in L4 classes");
-    assert_backend_error_contains(ctx, "class Box { set value(v) {} }\n", "setter syntax is unsupported in L4 classes");
-    assert_backend_error_contains(ctx, "class Box { field = 1; }\n", "class fields are unsupported in L4");
-    assert_backend_error_contains(ctx, "class Box { [\"value\"]() {} }\n", "computed method names are unsupported in L4 classes");
-    assert_backend_error_contains(ctx, "let Box = class {};\n", "class expressions are unsupported in L4");
+    assert_backend_error_contains(ctx, "class Box extends Base {}\n", "extends is unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "class Box { super(); }\n", "super is unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "class Box { static foo() {} }\n", "static class members are unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "class Box { get value() {} }\n", "getter syntax is unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "class Box { set value(v) {} }\n", "setter syntax is unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "class Box { field = 1; }\n", "class fields are unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "class Box { [\"value\"]() {} }\n", "computed method names are unsupported in jsrt class declarations");
+    assert_backend_error_contains(ctx, "let Box = class {};\n", "class expressions are unsupported in jsrt class declarations");
     assert_backend_parity(ctx, "print.prototype;\n");
     assert_backend_parity(
         ctx,
@@ -547,12 +547,12 @@ void run_vm_tests(TestContext *ctx) {
         "attempted to construct a non-function value"
     );
     assert_backend_error_contains(ctx, "function Box() {}\nBox.prototype = 1;\n", "function prototype must be an object or null");
-    assert_backend_error_contains(ctx, "print.prototype = {};\n", "native function prototypes are read-only in L3");
-    assert_backend_error_contains(ctx, "function Box() {}\nBox.x;\n", "only function.prototype is supported in L3");
-    assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"];\n", "only function.prototype is supported in L3");
-    assert_backend_error_contains(ctx, "function Box() {}\nBox[0];\n", "only function.prototype is supported in L3");
-    assert_backend_error_contains(ctx, "function Box() {}\nBox.x = 1;\n", "only function.prototype is supported in L3");
-    assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"] = 1;\n", "only function.prototype is supported in L3");
+    assert_backend_error_contains(ctx, "print.prototype = {};\n", "native function prototypes are read-only for constructor/prototype behavior");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox.x;\n", "only function.prototype is supported for constructor/prototype behavior");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"];\n", "only function.prototype is supported for constructor/prototype behavior");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox[0];\n", "only function.prototype is supported for constructor/prototype behavior");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox.x = 1;\n", "only function.prototype is supported for constructor/prototype behavior");
+    assert_backend_error_contains(ctx, "function Box() {}\nBox[\"x\"] = 1;\n", "only function.prototype is supported for constructor/prototype behavior");
     assert_backend_parity(
         ctx,
         "class Box {\n"

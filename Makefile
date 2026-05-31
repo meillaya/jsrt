@@ -1,71 +1,59 @@
-CC ?= cc
-CFLAGS ?= -std=c17 -Wall -Wextra -Werror -pedantic -Iinclude -g
-BUILD_DIR := build
-OBJ_DIR := $(BUILD_DIR)/obj
-BIN := $(BUILD_DIR)/jsrt
-TEST_BIN := $(BUILD_DIR)/test_jsrt
-BENCH_SCRIPT := scripts/benchmark.sh
+ZIG ?= zig
+ZIG_BUILD ?= $(ZIG) build
+
 ITERATIONS ?= 5
 WARMUPS ?= 1
 FIXTURE ?=
 FILTER ?=
 
-SRC := src/main.c src/memory.c src/diagnostics.c src/lexer.c src/ast.c src/parser.c src/value.c src/env.c src/gc.c src/eval.c src/runtime.c src/bytecode.c src/compiler.c src/vm.c
-LIB_SRC := src/memory.c src/diagnostics.c src/lexer.c src/ast.c src/parser.c src/value.c src/env.c src/gc.c src/eval.c src/runtime.c src/bytecode.c src/compiler.c src/vm.c
-TEST_SRC := tests/test_runner.c tests/test_lexer.c tests/test_parser.c tests/test_eval.c tests/test_runtime.c tests/test_diagnostics.c tests/test_bytecode.c tests/test_vm.c
+BENCH_OPTS := -Diterations=$(ITERATIONS) -Dwarmups=$(WARMUPS)
+BENCH_FILTER_OPTS :=
+ifneq ($(strip $(FIXTURE)),)
+BENCH_OPTS += -Dfixture=$(FIXTURE)
+BENCH_FILTER_OPTS += -Dfixture=$(FIXTURE)
+endif
+ifneq ($(strip $(FILTER)),)
+BENCH_OPTS += -Dfilter=$(FILTER)
+BENCH_FILTER_OPTS += -Dfilter=$(FILTER)
+endif
 
-OBJ := $(SRC:src/%.c=$(OBJ_DIR)/src/%.o)
-TEST_OBJ := $(LIB_SRC:src/%.c=$(OBJ_DIR)/src/%.o) $(TEST_SRC:tests/%.c=$(OBJ_DIR)/tests/%.o)
+.PHONY: all clean test debug conformance test262-adapter vm-parity verify-production bench bench-vm bench-compare bench-smoke asan
 
-.PHONY: all clean test debug conformance test262-adapter vm-parity verify-production bench bench-vm bench-compare bench-smoke
+all:
+	$(ZIG_BUILD) all
 
-all: $(BIN)
+debug:
+	$(ZIG_BUILD) debug
 
-debug: CFLAGS += -O0 -DJSRT_DEBUG
-debug: $(BIN)
+test:
+	$(ZIG_BUILD) test
 
-$(BIN): $(OBJ)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ -o $@
+conformance:
+	$(ZIG_BUILD) conformance
 
-$(TEST_BIN): $(TEST_OBJ)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ -o $@
+test262-adapter:
+	$(ZIG_BUILD) test262-adapter
 
-$(OBJ_DIR)/src/%.o: src/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+vm-parity:
+	$(ZIG_BUILD) vm-parity
 
-$(OBJ_DIR)/tests/%.o: tests/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+verify-production:
+	$(ZIG_BUILD) verify-production
 
-test: $(BIN) $(TEST_BIN)
-	./$(TEST_BIN)
+bench:
+	$(ZIG_BUILD) bench $(BENCH_OPTS)
 
-conformance: $(BIN) scripts/conformance.sh conformance/manifest.csv
-	@scripts/conformance.sh
+bench-vm:
+	$(ZIG_BUILD) bench-vm $(BENCH_OPTS)
+
+bench-compare:
+	$(ZIG_BUILD) bench-compare $(BENCH_OPTS)
+
+bench-smoke:
+	$(ZIG_BUILD) bench-smoke $(BENCH_FILTER_OPTS)
+
+asan:
+	$(ZIG_BUILD) asan
 
 clean:
-	rm -rf $(BUILD_DIR)
-
-
-test262-adapter: scripts/test262-adapter.sh conformance/test262-subset-manifest.csv
-	@scripts/test262-adapter.sh
-
-vm-parity: $(BIN) scripts/vm-parity.sh conformance/vm-parity-manifest.csv
-	@scripts/vm-parity.sh
-
-verify-production: test conformance test262-adapter vm-parity
-
-bench: $(BIN) $(BENCH_SCRIPT) benchmarks/manifest.csv
-	@ITERATIONS=$(ITERATIONS) WARMUPS=$(WARMUPS) FIXTURE="$(FIXTURE)" FILTER="$(FILTER)" ./$(BENCH_SCRIPT) bench
-
-bench-vm: $(BIN) $(BENCH_SCRIPT) benchmarks/manifest.csv
-	@ITERATIONS=$(ITERATIONS) WARMUPS=$(WARMUPS) FIXTURE="$(FIXTURE)" FILTER="$(FILTER)" ./$(BENCH_SCRIPT) bench-vm
-
-bench-compare: $(BIN) $(BENCH_SCRIPT) benchmarks/manifest.csv
-	@ITERATIONS=$(ITERATIONS) WARMUPS=$(WARMUPS) FIXTURE="$(FIXTURE)" FILTER="$(FILTER)" ./$(BENCH_SCRIPT) bench-compare
-
-bench-smoke: $(BIN) $(BENCH_SCRIPT) benchmarks/manifest.csv
-	@ITERATIONS=1 WARMUPS=0 FIXTURE="$(FIXTURE)" FILTER="$(FILTER)" ./$(BENCH_SCRIPT) bench-smoke
+	$(ZIG_BUILD) clean

@@ -318,7 +318,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "new Ctor()(1);", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "postfix chaining after 'new' is unsupported in L3") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "postfix chaining after 'new' is unsupported for constructor calls") != NULL);
         if (error != NULL) {
             free(error);
         }
@@ -342,7 +342,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box extends Base {}", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "extends is unsupported in L4 classes") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "extends is unsupported in jsrt class declarations") != NULL);
         free(error);
         token_array_free(&tokens);
 
@@ -362,7 +362,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { static foo() {} }", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "static class members are unsupported in L4") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "static class members are unsupported in jsrt class declarations") != NULL);
         free(error);
         token_array_free(&tokens);
 
@@ -372,7 +372,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { get foo() {} }", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "getter syntax is unsupported in L4 classes") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "getter syntax is unsupported in jsrt class declarations") != NULL);
         free(error);
         token_array_free(&tokens);
 
@@ -382,7 +382,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { value; }", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "class fields are unsupported in L4") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "class fields are unsupported in jsrt class declarations") != NULL);
         free(error);
         token_array_free(&tokens);
 
@@ -392,7 +392,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "class Box { [name]() {} }", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "computed method names are unsupported in L4 classes") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "computed method names are unsupported in jsrt class declarations") != NULL);
         free(error);
         token_array_free(&tokens);
 
@@ -402,7 +402,7 @@ void run_parser_tests(TestContext *ctx) {
         }
         EXPECT_FALSE(ctx, parse_tokens(&tokens, "let Box = class {};", &program, &error));
         EXPECT_TRUE(ctx, error != NULL);
-        EXPECT_TRUE(ctx, strstr(error, "class expressions are unsupported in L4") != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "class expressions are unsupported in jsrt class declarations") != NULL);
         free(error);
         token_array_free(&tokens);
     }

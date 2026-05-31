@@ -1251,7 +1251,7 @@ void run_eval_tests(TestContext *ctx) {
         &error
     );
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "postfix chaining after 'new' is unsupported in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "postfix chaining after 'new' is unsupported for constructor calls") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source(
@@ -1317,32 +1317,32 @@ void run_eval_tests(TestContext *ctx) {
 
     result = evaluate_source("print.prototype = {};\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "native function prototypes are read-only in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "native function prototypes are read-only for constructor/prototype behavior") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source("function Box() {}\nBox.x;\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported for constructor/prototype behavior") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source("function Box() {}\nBox[\"x\"];\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported for constructor/prototype behavior") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source("function Box() {}\nBox[0];\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported for constructor/prototype behavior") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source("function Box() {}\nBox.x = 1;\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported for constructor/prototype behavior") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source("function Box() {}\nBox[\"x\"] = 1;\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
-    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported in L3") != NULL);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "only function.prototype is supported for constructor/prototype behavior") != NULL);
     eval_result_free(&result);
 
     result = evaluate_source(

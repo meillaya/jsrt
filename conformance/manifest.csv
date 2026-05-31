@@ -4,4 +4,4 @@ positive-modules,conformance/positive/module_main.js,tree,success,42,
 negative-const-assign,conformance/negative/const_assign.js,tree,failure,,cannot assign to const variable
 negative-division-by-zero,conformance/negative/division_by_zero.js,both,failure,,division by zero
 negative-unexported-import,conformance/negative/import_hidden.js,tree,failure,,does not export 'hidden'
-negative-module-vm,conformance/positive/module_main.js,vm,failure,,modules are supported by the tree-walk backend only
+negative-module-vm,conformance/positive/module_main.js,vm,failure,,modules are supported by the tree-walk module evaluator only

@@ -523,7 +523,7 @@ static EvalResult unsupported_function_property_error(Evaluator *evaluator, int 
         line,
         column,
         1,
-        "only function.prototype is supported in L3"
+        "only function.prototype is supported for constructor/prototype behavior"
     );
 }
 
@@ -673,7 +673,7 @@ static EvalResult assign_named_property(Evaluator *evaluator, Value *target, con
                 line,
                 column,
                 1,
-                "native function prototypes are read-only in L3"
+                "native function prototypes are read-only for constructor/prototype behavior"
             );
         }
         if (value.type != VALUE_NULL && value.type != VALUE_OBJECT) {

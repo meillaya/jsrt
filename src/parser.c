@@ -292,13 +292,13 @@ static bool parse_class_method(Parser *parser, ClassMethod *method) {
     stmt_array_init(&body);
 
     if (match(parser, TOKEN_LEFT_BRACKET)) {
-        set_error(parser, previous(parser), "computed method names are unsupported in L4 classes");
+        set_error(parser, previous(parser), "computed method names are unsupported in jsrt class declarations");
         string_array_free(&params);
         stmt_array_free(&body);
         return false;
     }
     if (match(parser, TOKEN_SUPER)) {
-        set_error(parser, previous(parser), "super is unsupported in L4 classes");
+        set_error(parser, previous(parser), "super is unsupported in jsrt class declarations");
         string_array_free(&params);
         stmt_array_free(&body);
         return false;
@@ -316,17 +316,17 @@ static bool parse_class_method(Parser *parser, ClassMethod *method) {
         !check(parser, TOKEN_LEFT_PAREN)) {
         const char *message =
             strcmp(name_token->lexeme, "static") == 0
-                ? "static class members are unsupported in L4"
+                ? "static class members are unsupported in jsrt class declarations"
                 : (strcmp(name_token->lexeme, "get") == 0
-                    ? "getter syntax is unsupported in L4 classes"
-                    : "setter syntax is unsupported in L4 classes");
+                    ? "getter syntax is unsupported in jsrt class declarations"
+                    : "setter syntax is unsupported in jsrt class declarations");
         set_error(parser, name_token, message);
         string_array_free(&params);
         stmt_array_free(&body);
         return false;
     }
     if (!check(parser, TOKEN_LEFT_PAREN)) {
-        set_error(parser, name_token, "class fields are unsupported in L4");
+        set_error(parser, name_token, "class fields are unsupported in jsrt class declarations");
         string_array_free(&params);
         stmt_array_free(&body);
         return false;
@@ -360,7 +360,7 @@ static Stmt *parse_class_declaration(Parser *parser) {
     name_token = previous(parser);
 
     if (match(parser, TOKEN_EXTENDS)) {
-        set_error(parser, previous(parser), "extends is unsupported in L4 classes");
+        set_error(parser, previous(parser), "extends is unsupported in jsrt class declarations");
         class_method_array_free(&methods);
         return NULL;
     }
@@ -496,7 +496,7 @@ static Expr *parse_primary(Parser *parser) {
         return ast_new_this(token->line, token->column);
     }
     if (match(parser, TOKEN_SUPER)) {
-        set_error(parser, previous(parser), "super is unsupported in L4 classes");
+        set_error(parser, previous(parser), "super is unsupported in jsrt class declarations");
         return NULL;
     }
     if (match(parser, TOKEN_NEW)) {
@@ -504,7 +504,7 @@ static Expr *parse_primary(Parser *parser) {
         return parse_new_expression(parser, token);
     }
     if (match(parser, TOKEN_CLASS)) {
-        set_error(parser, previous(parser), "class expressions are unsupported in L4");
+        set_error(parser, previous(parser), "class expressions are unsupported in jsrt class declarations");
         return NULL;
     }
     if (match(parser, TOKEN_IDENTIFIER)) {
@@ -548,7 +548,7 @@ static Expr *parse_postfix(Parser *parser) {
     for (;;) {
         if (expr->kind == EXPR_NEW &&
             (check(parser, TOKEN_LEFT_PAREN) || check(parser, TOKEN_LEFT_BRACKET) || check(parser, TOKEN_DOT))) {
-            set_error(parser, peek(parser), "postfix chaining after 'new' is unsupported in L3");
+            set_error(parser, peek(parser), "postfix chaining after 'new' is unsupported for constructor calls");
             expr_destroy(expr);
             return NULL;
         }

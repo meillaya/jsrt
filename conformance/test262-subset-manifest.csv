@@ -1,5 +1,5 @@
-id,feature,milestone,tier,source,local_path,backends,expect,stdout,stderr_contains,skip_reason,xfail_reason
-local-const-assignment,bindings,P3,supported,repo-local,conformance/negative/const_assign.js,tree,failure,,cannot assign to const variable,,
-local-module-export,modules,M6,experimental,repo-local,conformance/positive/module_main.js,tree,success,42,,,
-future-promise-then,promise,A4,future,test262-placeholder,,tree,skip,,,Promise subset not implemented before A4,
-rejected-with-statement,syntax,P3,rejected,test262-placeholder,,tree,skip,,,with statement is outside jsrt production subset,
+id,feature,area,tier,source,local_path,backends,expect,stdout,stderr_contains,skip_reason,xfail_reason
+local-const-assignment,bindings,const-assignment-diagnostics,supported,repo-local,conformance/negative/const_assign.js,tree,failure,,cannot assign to const variable,,
+local-module-export,modules,treewalk-module-evaluation,experimental,repo-local,conformance/positive/module_main.js,tree,success,42,,,
+future-promise-then,promise,promise-api,future,test262-placeholder,,tree,skip,,,Promise subset is not implemented,
+rejected-with-statement,syntax,unsupported-syntax,rejected,test262-placeholder,,tree,skip,,,with statement is outside jsrt production subset,

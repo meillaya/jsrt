@@ -748,13 +748,13 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     if (key.type != VALUE_STRING) {
                         value_free(target);
                         value_free(key);
-                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported in L3");
+                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported for constructor/prototype behavior");
                         goto cleanup;
                     }
                     if (!vm_function_property_is_prototype(key.as.string)) {
                         value_free(target);
                         value_free(key);
-                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported in L3");
+                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported for constructor/prototype behavior");
                         goto cleanup;
                     }
                     result_value = value_clone(target.as.function->prototype);
@@ -815,21 +815,21 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                         value_free(target);
                         value_free(key);
                         value_free(value);
-                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported in L3");
+                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported for constructor/prototype behavior");
                         goto cleanup;
                     }
                     if (!vm_function_property_is_prototype(key.as.string)) {
                         value_free(target);
                         value_free(key);
                         value_free(value);
-                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported in L3");
+                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "only function.prototype is supported for constructor/prototype behavior");
                         goto cleanup;
                     }
                     if (target.as.function->is_native) {
                         value_free(target);
                         value_free(key);
                         value_free(value);
-                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "native function prototypes are read-only in L3");
+                        result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_TYPE, "native function prototypes are read-only for constructor/prototype behavior");
                         goto cleanup;
                     }
                     if (value.type != VALUE_NULL && value.type != VALUE_OBJECT) {

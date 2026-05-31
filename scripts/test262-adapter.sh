@@ -10,7 +10,7 @@ if [[ ! -f "$MANIFEST" ]]; then
   exit 1
 fi
 
-while IFS=, read -r id feature milestone tier source local_path backends expect stdout stderr_contains skip_reason xfail_reason; do
+while IFS=, read -r id feature area tier source local_path backends expect stdout stderr_contains skip_reason xfail_reason; do
   [[ "$id" == "id" || -z "$id" ]] && continue
   cases=$((cases + 1))
   case "$tier" in supported|experimental|future|rejected) ;;
