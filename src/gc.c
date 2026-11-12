@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "jsrt/env.h"
+#include "jsrt/memory.h"
 #include "jsrt/value.h"
 
 static GcHeader *gc_registry_head = NULL;
@@ -12,6 +13,13 @@ static GcTempRoot *gc_temp_roots = NULL;
 static GcStatsSnapshot gc_stats = {0};
 static bool gc_trace_enabled = false;
 static size_t gc_temp_root_count = 0;
+
+typedef struct GcEnvRoot {
+    struct Env *env;
+    struct GcEnvRoot *next;
+} GcEnvRoot;
+
+static GcEnvRoot *gc_env_roots = NULL;
 
 static size_t gc_live_count(GcObjectKind kind);
 
@@ -101,6 +109,41 @@ void gc_temp_root_pop(GcTempRoot *root) {
     root->previous = NULL;
 }
 
+void gc_add_env_root(struct Env *env) {
+    GcEnvRoot *root;
+
+    if (env == NULL) {
+        return;
+    }
+    root = jsrt_malloc(sizeof(*root));
+    root->env = env;
+    root->next = gc_env_roots;
+    gc_env_roots = root;
+}
+
+void gc_remove_env_root(struct Env *env) {
+    GcEnvRoot **cursor = &gc_env_roots;
+
+    while (*cursor != NULL) {
+        if ((*cursor)->env == env) {
+            GcEnvRoot *removed = *cursor;
+            *cursor = removed->next;
+            free(removed);
+            return;
+        }
+        cursor = &(*cursor)->next;
+    }
+}
+
+static void gc_mark_env_roots(void) {
+    const GcEnvRoot *cursor = gc_env_roots;
+
+    while (cursor != NULL) {
+        env_mark_reachable(cursor->env);
+        cursor = cursor->next;
+    }
+}
+
 static void gc_clear_marks(void) {
     GcHeader *cursor = gc_registry_head;
 
@@ -139,6 +182,7 @@ static void gc_sweep_env(Env *env) {
     if (env->has_this) {
         value_release_reference(env->this_value);
     }
+    env_release_units(env);
     free(env);
 }
 
@@ -187,6 +231,7 @@ void gc_collect_with_reason(struct Env *root_env, const struct Value *root_value
     if (root_value != NULL) {
         value_mark_reachable(*root_value);
     }
+    gc_mark_env_roots();
     gc_mark_temp_roots();
 
     gc_stats.swept_envs = 0U;

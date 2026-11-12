@@ -76,7 +76,7 @@ typedef struct BytecodeFunction {
 } BytecodeFunction;
 
 typedef struct BytecodeProgram {
-    BytecodeFunction *functions;
+    BytecodeFunction **functions;
     size_t function_count;
     size_t function_capacity;
     char **globals;

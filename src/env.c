@@ -11,6 +11,7 @@ Env *env_create(Env *parent) {
     gc_register_object(&env->gc, GC_OBJECT_ENV);
     env->parent = parent;
     env->head = NULL;
+    env->units = NULL;
     env->has_this = false;
     env->this_value = value_null();
     return env;
@@ -20,6 +21,22 @@ void env_destroy(Env *env) {
     if (env == NULL) {
         return;
     }
+}
+
+void env_attach_unit(Env *env, AstUnit *unit) {
+    if (env == NULL || unit == NULL) {
+        return;
+    }
+    unit->next = env->units;
+    env->units = unit;
+}
+
+void env_release_units(Env *env) {
+    if (env == NULL) {
+        return;
+    }
+    ast_unit_free_all(env->units);
+    env->units = NULL;
 }
 
 void env_destroy_all(void) {

@@ -191,6 +191,26 @@ void stmt_array_free(StmtArray *array) {
     array->capacity = 0;
 }
 
+AstUnit *ast_unit_create(StmtArray *program) {
+    AstUnit *unit = jsrt_malloc(sizeof(*unit));
+
+    unit->program = *program;
+    unit->next = NULL;
+    stmt_array_init(program);
+    return unit;
+}
+
+void ast_unit_free_all(AstUnit *units) {
+    AstUnit *unit = units;
+
+    while (unit != NULL) {
+        AstUnit *next = unit->next;
+        stmt_array_free(&unit->program);
+        free(unit);
+        unit = next;
+    }
+}
+
 static Expr *alloc_expr(ExprKind kind, int line, int column) {
     Expr *expr = jsrt_malloc(sizeof(*expr));
     expr->kind = kind;

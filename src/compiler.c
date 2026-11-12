@@ -109,7 +109,7 @@ static BytecodeFunction *add_function(BytecodeProgram *program, const char *name
         program->functions = jsrt_realloc(program->functions, sizeof(*program->functions) * new_capacity);
         program->function_capacity = new_capacity;
     }
-    function = &program->functions[program->function_count++];
+    function = jsrt_malloc(sizeof(*function));
     function->name = name != NULL ? jsrt_strdup(name) : NULL;
     function->is_class_constructor = false;
     function->arity = arity;
@@ -123,6 +123,7 @@ static BytecodeFunction *add_function(BytecodeProgram *program, const char *name
     function->constants = NULL;
     function->constant_count = 0;
     function->constant_capacity = 0;
+    program->functions[program->function_count++] = function;
     return function;
 }
 
@@ -354,17 +355,20 @@ static bool compile_identifier_load(Compiler *compiler, const char *name, int li
 static bool compile_identifier_store(Compiler *compiler, const char *name, int line, int column, char **error_message) {
     int slot = resolve_local(compiler, name);
     int upvalue;
-    (void)line;
-    (void)column;
-    (void)error_message;
     if (slot >= 0) {
         emit_instruction(compiler->function, BC_STORE_LOCAL, slot);
         return true;
     }
     upvalue = resolve_upvalue(compiler, name);
     if (upvalue >= 0) {
-        emit_instruction(compiler->function, BC_STORE_UPVALUE, upvalue);
-        return true;
+        return set_compile_error_take(
+            compiler->source,
+            line,
+            column,
+            (int)strlen(name),
+            jsrt_format("the VM backend does not support assigning to a captured variable '%s'", name),
+            error_message
+        );
     }
     emit_instruction(compiler->function, BC_STORE_GLOBAL, add_global_symbol(compiler->program, name));
     return true;
@@ -832,7 +836,7 @@ static ControlContext *find_loop_control(Compiler *compiler) {
 
 static bool compile_if_statement(Compiler *compiler, const Stmt *stmt, char **error_message) {
     int false_jump;
-    int end_jump = -1;
+    int end_jump;
     if (!compile_expression(compiler, stmt->as.if_stmt.condition, error_message)) {
         return false;
     }
@@ -841,17 +845,15 @@ static bool compile_if_statement(Compiler *compiler, const Stmt *stmt, char **er
     if (!compile_statement(compiler, stmt->as.if_stmt.then_branch, error_message)) {
         return false;
     }
-    if (stmt->as.if_stmt.else_branch != NULL) {
-        end_jump = emit_instruction(compiler->function, BC_JUMP, -1);
-    }
+    end_jump = emit_instruction(compiler->function, BC_JUMP, -1);
     patch_instruction(compiler->function, false_jump, (int)compiler->function->instruction_count);
     emit_instruction(compiler->function, BC_POP, 0);
     if (stmt->as.if_stmt.else_branch != NULL) {
         if (!compile_statement(compiler, stmt->as.if_stmt.else_branch, error_message)) {
             return false;
         }
-        patch_instruction(compiler->function, end_jump, (int)compiler->function->instruction_count);
     }
+    patch_instruction(compiler->function, end_jump, (int)compiler->function->instruction_count);
     return true;
 }
 

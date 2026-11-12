@@ -11,12 +11,21 @@
 #include "jsrt/parser.h"
 #include "jsrt/value.h"
 
-struct JsrtRuntime {
-    int reserved;
-};
+/* Each runtime keeps one global environment, so successive eval calls share
+ * bindings. Collection sweeps every object that no root reaches, which means
+ * the environments of other live runtimes have to be rooted while one runtime
+ * evaluates or tears down. */
+typedef struct JsrtRuntime {
+    Env *env;
+    JsrtInterruptCallback interrupt_callback;
+    void *interrupt_user_data;
+    struct JsrtRuntime *next;
+} JsrtRuntime;
+
+static JsrtRuntime *jsrt_runtime_list = NULL;
 
 const char *jsrt_runtime_version(void) {
-    return "0.1.0";
+    return "0.2.0";
 }
 
 static JsrtRunResult jsrt_result_ok_from_value(Value value) {
@@ -26,17 +35,25 @@ static JsrtRunResult jsrt_result_ok_from_value(Value value) {
     result.value_text = result.has_value ? value_to_string(value) : NULL;
     result.error_message = NULL;
     result.runtime_error_kind = RUNTIME_ERROR_NONE;
+    result.error_line = 0;
+    result.error_column = 0;
     return result;
 }
 
-static JsrtRunResult jsrt_result_error(char *message, RuntimeErrorKind kind) {
+static JsrtRunResult jsrt_result_error(char *message, RuntimeErrorKind kind, int line, int column) {
     JsrtRunResult result;
     result.ok = false;
     result.has_value = false;
     result.value_text = NULL;
     result.error_message = message;
     result.runtime_error_kind = kind;
+    result.error_line = line;
+    result.error_column = column;
     return result;
+}
+
+static JsrtRunResult jsrt_result_message(const char *message, RuntimeErrorKind kind) {
+    return jsrt_result_error(jsrt_strdup(message), kind, 0, 0);
 }
 
 static char *read_runtime_file(const char *path) {
@@ -67,11 +84,38 @@ static char *read_runtime_file(const char *path) {
 
 JsrtRuntime *jsrt_runtime_create(void) {
     JsrtRuntime *runtime = jsrt_malloc(sizeof(*runtime));
-    runtime->reserved = 0;
+
+    runtime->env = env_create(NULL);
+    gc_add_env_root(runtime->env);
+    runtime->interrupt_callback = NULL;
+    runtime->interrupt_user_data = NULL;
+    runtime->next = jsrt_runtime_list;
+    jsrt_runtime_list = runtime;
     return runtime;
 }
 
+void jsrt_runtime_set_interrupt(JsrtRuntime *runtime, JsrtInterruptCallback callback, void *user_data) {
+    if (runtime == NULL) {
+        return;
+    }
+    runtime->interrupt_callback = callback;
+    runtime->interrupt_user_data = user_data;
+}
+
 void jsrt_runtime_destroy(JsrtRuntime *runtime) {
+    JsrtRuntime **cursor;
+
+    if (runtime == NULL) {
+        return;
+    }
+    cursor = &jsrt_runtime_list;
+    while (*cursor != NULL && *cursor != runtime) {
+        cursor = &(*cursor)->next;
+    }
+    if (*cursor == runtime) {
+        *cursor = runtime->next;
+    }
+    gc_remove_env_root(runtime->env);
     free(runtime);
     gc_collect_with_reason(NULL, NULL, "runtime-destroy");
 }
@@ -79,36 +123,44 @@ void jsrt_runtime_destroy(JsrtRuntime *runtime) {
 JsrtRunResult jsrt_runtime_eval_source(JsrtRuntime *runtime, const char *source, const char *module_path) {
     TokenArray tokens;
     StmtArray program;
-    Env *env;
     EvalResult eval_result;
     JsrtRunResult run_result;
     char *error = NULL;
     bool lexed = false;
     bool parsed = false;
 
-    (void)runtime;
+    if (runtime == NULL) {
+        return jsrt_result_message("evaluation requires a runtime", RUNTIME_ERROR_INTERNAL);
+    }
+    if (source == NULL) {
+        return jsrt_result_message("evaluation requires a source string", RUNTIME_ERROR_INTERNAL);
+    }
+
     token_array_init(&tokens);
     stmt_array_init(&program);
 
     if (!lex_source(source, &tokens, &error)) {
-        return jsrt_result_error(error, RUNTIME_ERROR_NONE);
+        return jsrt_result_error(error, RUNTIME_ERROR_NONE, 0, 0);
     }
     lexed = true;
 
     if (!parse_tokens(&tokens, source, &program, &error)) {
-        if (lexed) {
-            token_array_free(&tokens);
-        }
-        return jsrt_result_error(error, RUNTIME_ERROR_NONE);
+        token_array_free(&tokens);
+        return jsrt_result_error(error, RUNTIME_ERROR_NONE, 0, 0);
     }
     parsed = true;
 
-    env = env_create(NULL);
-    eval_result = eval_program_with_path(&program, source, env, module_path);
-    env_destroy(env);
+    eval_set_interrupt_check(runtime->interrupt_callback, runtime->interrupt_user_data);
+    eval_result = eval_program_with_path(&program, source, runtime->env, module_path);
+    eval_set_interrupt_check(NULL, NULL);
 
     if (eval_result.had_error) {
-        run_result = jsrt_result_error(eval_result.error_message, eval_result.runtime_error_kind);
+        run_result = jsrt_result_error(
+            eval_result.error_message,
+            eval_result.runtime_error_kind,
+            eval_result.error_line,
+            eval_result.error_column
+        );
         eval_result.error_message = NULL;
     } else {
         run_result = jsrt_result_ok_from_value(eval_result.value);
@@ -116,7 +168,6 @@ JsrtRunResult jsrt_runtime_eval_source(JsrtRuntime *runtime, const char *source,
 
     value_free(eval_result.value);
     eval_result_free(&eval_result);
-    gc_collect_with_reason(NULL, NULL, "runtime-eval-cleanup");
     if (parsed) {
         stmt_array_free(&program);
     }
@@ -127,11 +178,18 @@ JsrtRunResult jsrt_runtime_eval_source(JsrtRuntime *runtime, const char *source,
 }
 
 JsrtRunResult jsrt_runtime_eval_file(JsrtRuntime *runtime, const char *path) {
-    char *source = read_runtime_file(path);
+    char *source;
     JsrtRunResult result;
 
+    if (runtime == NULL) {
+        return jsrt_result_message("evaluation requires a runtime", RUNTIME_ERROR_INTERNAL);
+    }
+    if (path == NULL) {
+        return jsrt_result_message("evaluation requires a file path", RUNTIME_ERROR_LOOKUP);
+    }
+    source = read_runtime_file(path);
     if (source == NULL) {
-        return jsrt_result_error(jsrt_format("Unable to read file: %s", path), RUNTIME_ERROR_LOOKUP);
+        return jsrt_result_error(jsrt_format("Unable to read file: %s", path), RUNTIME_ERROR_LOOKUP, 0, 0);
     }
     result = jsrt_runtime_eval_source(runtime, source, path);
     free(source);
@@ -149,4 +207,6 @@ void jsrt_run_result_free(JsrtRunResult *result) {
     result->ok = false;
     result->has_value = false;
     result->runtime_error_kind = RUNTIME_ERROR_NONE;
+    result->error_line = 0;
+    result->error_column = 0;
 }

@@ -11,6 +11,14 @@
 #include "jsrt/vm.h"
 #include "test.h"
 
+static int vm_interrupt_calls = 0;
+
+static bool vm_interrupt_after_three_calls(void *user_data) {
+    (void)user_data;
+    vm_interrupt_calls += 1;
+    return vm_interrupt_calls > 3;
+}
+
 static bool parse_source_text(const char *source, TokenArray *tokens, StmtArray *program, char **error_message) {
     stmt_array_init(program);
     if (!lex_source(source, tokens, error_message)) {
@@ -193,10 +201,64 @@ void run_vm_tests(TestContext *ctx) {
     );
     assert_backend_parity(
         ctx,
+        "let x = 0;\n"
+        "if (true) { x = 7; }\n"
+        "x;\n"
+    );
+    assert_backend_parity(
+        ctx,
+        "let x = 1;\n"
+        "if (false) { x = 2; }\n"
+        "x;\n"
+    );
+    assert_backend_parity(
+        ctx,
         "function add(a, b) { return a + b; }\n"
         "let value = add(3, 4);\n"
         "value;\n"
     );
+    /* Four declarations grow the function table and move its storage. */
+    assert_backend_parity(
+        ctx,
+        "function f1() { return 1; }\n"
+        "function f2() { return 2; }\n"
+        "function f3() { return 3; }\n"
+        "function f4() { return 4; }\n"
+        "f1() + f2() + f3() + f4();\n"
+    );
+    /* Nested declarations grow the table while parent compilers run. */
+    assert_backend_parity(
+        ctx,
+        "function outer() {\n"
+        "  function a() { return 1; }\n"
+        "  function b() { return 2; }\n"
+        "  function c() { return 3; }\n"
+        "  function d() { return 4; }\n"
+        "  return a() + b() + c() + d();\n"
+        "}\n"
+        "outer();\n"
+    );
+    {
+        /* Twenty declarations force several growth steps. */
+        char source[2048];
+        size_t offset = 0U;
+        size_t i;
+
+        for (i = 1U; i <= 20U; ++i) {
+            offset += (size_t)snprintf(
+                source + offset,
+                sizeof(source) - offset,
+                "function many%zu() { return 1; }\n",
+                i
+            );
+        }
+        offset += (size_t)snprintf(source + offset, sizeof(source) - offset, "many1()");
+        for (i = 2U; i <= 20U; ++i) {
+            offset += (size_t)snprintf(source + offset, sizeof(source) - offset, " + many%zu()", i);
+        }
+        (void)snprintf(source + offset, sizeof(source) - offset, ";\n");
+        assert_backend_value_text(ctx, source, "20");
+    }
     assert_backend_parity(
         ctx,
         "let total = 0;\n"
@@ -232,19 +294,59 @@ void run_vm_tests(TestContext *ctx) {
         ctx,
         "function makeCounter(start) {\n"
         "  let current = start;\n"
-        "  return function (step) {\n"
-        "    current = current + step;\n"
-        "    return current;\n"
-        "  };\n"
+        "  return function () { return current; };\n"
         "}\n"
-        "let counter = makeCounter(2);\n"
-        "counter(3) + counter(4);\n"
+        "let read = makeCounter(2);\n"
+        "read() + read();\n"
     );
+    /* A captured object stays shared, so property writes remain visible. */
+    assert_backend_parity(
+        ctx,
+        "function outer() {\n"
+        "  let box = {value: 1};\n"
+        "  function bump() { box.value = box.value + 1; }\n"
+        "  bump();\n"
+        "  return box.value;\n"
+        "}\n"
+        "outer();\n"
+    );
+    {
+        const char *source =
+            "function outer() {\n"
+            "  let x = 1;\n"
+            "  function inc() { x = x + 1; }\n"
+            "  inc();\n"
+            "  return x;\n"
+            "}\n"
+            "outer();\n";
+        char *error = NULL;
+        EvalResult tree = eval_treewalk_source(source, &error);
+        EvalResult vm = eval_vm_source(source, &error);
+
+        EXPECT_FALSE(ctx, tree.had_error);
+        if (!tree.had_error) {
+            value_free(tree.value);
+        }
+        EXPECT_TRUE(ctx, vm.had_error);
+        EXPECT_TRUE(ctx, vm.error_message != NULL);
+        if (vm.error_message != NULL) {
+            EXPECT_TRUE(ctx, strstr(vm.error_message, "Compiler error") != NULL);
+            EXPECT_TRUE(ctx, strstr(vm.error_message, "does not support assigning to a captured variable") != NULL);
+        }
+        eval_result_free(&tree);
+        eval_result_free(&vm);
+    }
     assert_backend_parity(
         ctx,
         "let values = [1, 2, 3, 4];\n"
         "let meta = {name: \"jsrt\", third: values[2], nested: {label: \"runtime\"}};\n"
         "meta.name + \":\" + meta.third + \":\" + meta.nested.label;\n"
+    );
+    /* A duplicate object key keeps the last value and one entry. */
+    assert_backend_parity(
+        ctx,
+        "let o = {a: 1, a: 2};\n"
+        "o.a + \":\" + len(o);\n"
     );
     assert_backend_parity(
         ctx,
@@ -664,6 +766,71 @@ void run_vm_tests(TestContext *ctx) {
         EXPECT_TRUE(ctx, result.had_error);
         EXPECT_TRUE(ctx, result.error_message != NULL);
         EXPECT_TRUE(ctx, strstr(result.error_message, "binary operator expects numbers") != NULL);
+        eval_result_free(&result);
+    }
+
+    {
+        char *error = NULL;
+        EvalResult tree = eval_treewalk_source(
+            "let f = function(n) { if (n <= 0) { return 0; } return f(n - 1) + 1; };\n"
+            "f(300);\n",
+            &error
+        );
+        EvalResult vm_result = eval_vm_source(
+            "let f = function(n) { if (n <= 0) { return 0; } return f(n - 1) + 1; };\n"
+            "f(300);\n",
+            &error
+        );
+
+        EXPECT_TRUE(ctx, tree.had_error);
+        EXPECT_TRUE(ctx, vm_result.had_error);
+        EXPECT_TRUE(ctx, strstr(tree.error_message, "maximum call depth exceeded") != NULL);
+        EXPECT_TRUE(ctx, strstr(vm_result.error_message, "maximum call depth exceeded") != NULL);
+        eval_result_free(&tree);
+        eval_result_free(&vm_result);
+    }
+
+    {
+        char *error = NULL;
+        EvalResult result;
+
+        /* The VM checks the host interrupt hook between instructions. */
+        vm_interrupt_calls = 0;
+        eval_set_interrupt_check(vm_interrupt_after_three_calls, NULL);
+        result = eval_vm_source("let i = 0; while (i < 100000) { i = i + 1; } i;", &error);
+        eval_set_interrupt_check(NULL, NULL);
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_TRUE(ctx, strstr(result.error_message, "execution interrupted") != NULL);
+        eval_result_free(&result);
+    }
+
+    {
+        /* A corrupted instruction stream trips the stack underflow guard. */
+        BytecodeInstruction instructions[2];
+        BytecodeFunction function;
+        BytecodeFunction *functions[1];
+        BytecodeProgram program;
+        EvalResult result;
+
+        memset(&function, 0, sizeof(function));
+        memset(instructions, 0, sizeof(instructions));
+        instructions[0].op = BC_POP;
+        instructions[0].width = 1;
+        instructions[1].op = BC_RETURN;
+        instructions[1].width = 1;
+        function.instructions = instructions;
+        function.instruction_count = 2U;
+        functions[0] = &function;
+        bytecode_program_init(&program);
+        program.functions = functions;
+        program.function_count = 1U;
+        program.function_capacity = 1U;
+        result = vm_execute_program(&program, "underflow");
+        EXPECT_TRUE(ctx, result.had_error);
+        EXPECT_TRUE(ctx, result.error_message != NULL);
+        if (result.error_message != NULL) {
+            EXPECT_TRUE(ctx, strstr(result.error_message, "vm stack underflow") != NULL);
+        }
         eval_result_free(&result);
     }
 

@@ -1,7 +1,11 @@
 id,path,backends,expect,stdout,stderr_contains
 positive-arithmetic,conformance/positive/arithmetic.js,both,success,7,
 positive-modules,conformance/positive/module_main.js,tree,success,42,
+positive-modern-semantics,conformance/positive/modern_semantics.js,tree,success,0:1:2|11:0|AB:1:2|2:1|true,
 negative-const-assign,conformance/negative/const_assign.js,tree,failure,,cannot assign to const variable
 negative-division-by-zero,conformance/negative/division_by_zero.js,both,failure,,division by zero
 negative-unexported-import,conformance/negative/import_hidden.js,tree,failure,,does not export 'hidden'
+negative-regex-unsupported,conformance/negative/regex_unsupported.js,tree,failure,,unsupported regex pattern
+negative-expression-chain,conformance/negative/expression_chain.js,tree,failure,,expression chain is too long
+negative-module-cycle,conformance/negative/module_cycle_a.js,tree,failure,,cyclic module import is unsupported
 negative-module-vm,conformance/positive/module_main.js,vm,failure,,modules are supported by the tree-walk module evaluator only

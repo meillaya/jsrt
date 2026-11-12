@@ -64,7 +64,7 @@ void bytecode_program_free(BytecodeProgram *program) {
     }
 
     for (i = 0; i < program->function_count; ++i) {
-        BytecodeFunction *function = &program->functions[i];
+        BytecodeFunction *function = program->functions[i];
         size_t j;
         free(function->name);
         free(function->upvalues);
@@ -73,6 +73,7 @@ void bytecode_program_free(BytecodeProgram *program) {
             value_free(function->constants[j]);
         }
         free(function->constants);
+        free(function);
     }
     free(program->functions);
 
@@ -137,8 +138,8 @@ static char *disassemble_instruction(const BytecodeProgram *program, const Bytec
                 index,
                 name,
                 instruction->operand,
-                program->functions[(size_t)instruction->operand].name != NULL
-                    ? program->functions[(size_t)instruction->operand].name
+                program->functions[(size_t)instruction->operand]->name != NULL
+                    ? program->functions[(size_t)instruction->operand]->name
                     : "<anonymous>"
             );
         default:
@@ -151,7 +152,7 @@ char *bytecode_disassemble_program(const BytecodeProgram *program) {
     char *result = jsrt_strdup("");
 
     for (i = 0; i < program->function_count; ++i) {
-        const BytecodeFunction *function = &program->functions[i];
+        const BytecodeFunction *function = program->functions[i];
         size_t j;
         result = join_both_owned(
             result,

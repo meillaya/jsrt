@@ -46,11 +46,22 @@ typedef struct {
     ActiveEnvScope *active_envs;
     int loop_depth;
     int switch_depth;
+    int call_depth;
 } Evaluator;
 
 static ModuleRecord *module_records = NULL;
 static int eval_execution_depth = 0;
+static EvalInterruptCheck eval_interrupt_check = NULL;
+static void *eval_interrupt_user_data = NULL;
 
+void eval_set_interrupt_check(EvalInterruptCheck check, void *user_data) {
+    eval_interrupt_check = check;
+    eval_interrupt_user_data = user_data;
+}
+
+bool eval_interrupt_requested(void) {
+    return eval_interrupt_check != NULL && eval_interrupt_check(eval_interrupt_user_data);
+}
 static void job_queue_init(JobQueue *queue) {
     queue->items = NULL;
     queue->count = 0;
@@ -97,6 +108,8 @@ typedef struct {
     AssignStepKind kind;
     const char *property_name;
     const Expr *index_expr;
+    Value index_value;
+    bool index_evaluated;
     int line;
     int column;
 } AssignStep;
@@ -220,8 +233,86 @@ static char *module_dirname(const char *path) {
     }
 }
 
+/* Collapse "." and ".." segments so one file always produces one module path.
+ * Without this, each relative import hop adds another "./" and the cycle check
+ * compares different strings for the same file. */
+static char *normalize_module_path(const char *path) {
+    size_t length = strlen(path);
+    const char **segments = jsrt_malloc(sizeof(*segments) * (length + 1U));
+    size_t *segment_lengths = jsrt_malloc(sizeof(*segment_lengths) * (length + 1U));
+    size_t count = 0;
+    size_t index = 0;
+    bool absolute = path[0] == '/';
+    char *normalized;
+    size_t normalized_length = absolute ? 1U : 0U;
+
+    while (index < length) {
+        size_t start = index;
+        while (index < length && path[index] != '/') {
+            index += 1;
+        }
+        if (index > start) {
+            size_t segment_length = index - start;
+            const char *segment = path + start;
+            if (segment_length == 1U && segment[0] == '.') {
+                /* A "." segment adds nothing. */
+            } else if (segment_length == 2U && segment[0] == '.' && segment[1] == '.') {
+                if (count > 0U && !(segment_lengths[count - 1U] == 2U &&
+                        segments[count - 1U][0] == '.' && segments[count - 1U][1] == '.')) {
+                    count -= 1U;
+                } else if (!absolute) {
+                    segments[count] = segment;
+                    segment_lengths[count] = segment_length;
+                    count += 1U;
+                }
+            } else {
+                segments[count] = segment;
+                segment_lengths[count] = segment_length;
+                count += 1U;
+            }
+        }
+        index += 1U;
+    }
+
+    for (index = 0; index < count; ++index) {
+        normalized_length += segment_lengths[index];
+        if (index + 1U < count) {
+            normalized_length += 1U;
+        }
+    }
+    if (normalized_length == 0U) {
+        normalized_length = 1U;
+    }
+    normalized = jsrt_malloc(normalized_length + 1U);
+    {
+        size_t offset = 0;
+        if (absolute) {
+            normalized[offset] = '/';
+            offset += 1U;
+        }
+        for (index = 0; index < count; ++index) {
+            memcpy(normalized + offset, segments[index], segment_lengths[index]);
+            offset += segment_lengths[index];
+            if (index + 1U < count) {
+                normalized[offset] = '/';
+                offset += 1U;
+            }
+        }
+        if (offset == 0U) {
+            normalized[offset] = '.';
+            offset += 1U;
+        }
+        normalized[offset] = '\0';
+    }
+
+    free(segments);
+    free(segment_lengths);
+    return normalized;
+}
+
 static char *resolve_module_path(const char *base_path, const char *specifier) {
     char *candidate;
+    char *resolved;
 
     if (specifier[0] == '/') {
         candidate = jsrt_strdup(specifier);
@@ -230,7 +321,9 @@ static char *resolve_module_path(const char *base_path, const char *specifier) {
         candidate = jsrt_format("%s/%s", dir, specifier);
         free(dir);
     }
-    return candidate;
+    resolved = normalize_module_path(candidate);
+    free(candidate);
+    return resolved;
 }
 
 static ModuleRecord *module_record_find(const char *path) {
@@ -251,6 +344,7 @@ static ModuleRecord *module_record_create(const char *path, char *source) {
     token_array_init(&record->tokens);
     stmt_array_init(&record->program);
     record->env = env_create(NULL);
+    gc_add_env_root(record->env);
     string_array_init(&record->exports);
     record->lexed = false;
     record->parsed = false;
@@ -265,13 +359,11 @@ static void module_records_free_all(void) {
 
     while (record != NULL) {
         ModuleRecord *next = record->next;
-        if (record->parsed) {
-            stmt_array_free(&record->program);
-        }
         if (record->lexed) {
             token_array_free(&record->tokens);
         }
         string_array_free(&record->exports);
+        gc_remove_env_root(record->env);
         free(record->source);
         free(record->path);
         free(record);
@@ -470,46 +562,317 @@ static bool value_is_object_like(Value value) {
     return value.type == VALUE_OBJECT || value.type == VALUE_ARRAY || value.type == VALUE_FUNCTION;
 }
 
+/* Bounded regular expression matcher. It supports literals, ".", character
+ * classes with ranges and negation, the \d \D \w \W \s \S escapes, the * + ?
+ * quantifiers, and the ^ and $ anchors. Groups, alternation, and counted
+ * repetition are rejected instead of being compared as literal text. */
+#define REGEX_SET_BYTES 32U
+#define JSRT_MAX_REGEX_PATTERN 1024U
+#define JSRT_MAX_REGEX_STEPS 2000000U
+
+static size_t regex_match_steps = 0;
+static bool regex_match_over_budget = false;
+
+typedef struct {
+    bool any;
+    bool negated;
+    unsigned char bits[REGEX_SET_BYTES];
+} RegexAtom;
+
+static void regex_set_add(unsigned char *bits, unsigned char byte) {
+    bits[byte >> 3U] |= (unsigned char)(1U << (byte & 7U));
+}
+
+static bool regex_set_has(const unsigned char *bits, unsigned char byte) {
+    return (bits[byte >> 3U] & (unsigned char)(1U << (byte & 7U))) != 0;
+}
+
+static bool regex_is_digit(unsigned char byte) {
+    return byte >= '0' && byte <= '9';
+}
+
+static bool regex_is_word(unsigned char byte) {
+    return regex_is_digit(byte) || (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || byte == '_';
+}
+
+static bool regex_is_space(unsigned char byte) {
+    return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == '\f' || byte == '\v';
+}
+
+static void regex_set_add_escape_class(unsigned char *bits, char kind) {
+    unsigned int byte;
+
+    for (byte = 0; byte < 256U; ++byte) {
+        unsigned char candidate = (unsigned char)byte;
+        bool include = false;
+        switch (kind) {
+            case 'd': include = regex_is_digit(candidate); break;
+            case 'D': include = !regex_is_digit(candidate); break;
+            case 'w': include = regex_is_word(candidate); break;
+            case 'W': include = !regex_is_word(candidate); break;
+            case 's': include = regex_is_space(candidate); break;
+            case 'S': include = !regex_is_space(candidate); break;
+            default: break;
+        }
+        if (include) {
+            regex_set_add(bits, candidate);
+        }
+    }
+}
+
+static bool regex_escape_is_class(char kind) {
+    return kind == 'd' || kind == 'D' || kind == 'w' || kind == 'W' || kind == 's' || kind == 'S';
+}
+
+static char regex_escaped_literal(char escaped) {
+    switch (escaped) {
+        case 'n': return '\n';
+        case 't': return '\t';
+        case 'r': return '\r';
+        case 'b': return '\b';
+        case 'f': return '\f';
+        case 'v': return '\v';
+        default: return escaped;
+    }
+}
+
+static bool regex_parse_atom(const char **pattern, RegexAtom *atom) {
+    char current = **pattern;
+
+    atom->any = false;
+    atom->negated = false;
+    memset(atom->bits, 0, sizeof(atom->bits));
+
+    if (current == '\0') {
+        return false;
+    }
+    if (current == '.') {
+        atom->any = true;
+        *pattern += 1;
+        return true;
+    }
+    if (current == '\\') {
+        char escaped;
+        *pattern += 1;
+        escaped = **pattern;
+        if (escaped == '\0') {
+            return false;
+        }
+        if (regex_escape_is_class(escaped)) {
+            regex_set_add_escape_class(atom->bits, escaped);
+        } else {
+            char literal = regex_escaped_literal(escaped);
+            if (literal == '\0') {
+                return false;
+            }
+            regex_set_add(atom->bits, (unsigned char)literal);
+        }
+        *pattern += 1;
+        return true;
+    }
+    if (current == '[') {
+        bool first_item = true;
+        *pattern += 1;
+        if (**pattern == '^') {
+            atom->negated = true;
+            *pattern += 1;
+        }
+        while (**pattern != '\0' && (**pattern != ']' || first_item)) {
+            first_item = false;
+            if (**pattern == ']') {
+                regex_set_add(atom->bits, ']');
+                *pattern += 1;
+                continue;
+            }
+            if (**pattern == '\\') {
+                char escaped;
+                *pattern += 1;
+                escaped = **pattern;
+                if (escaped == '\0') {
+                    return false;
+                }
+                if (regex_escape_is_class(escaped)) {
+                    regex_set_add_escape_class(atom->bits, escaped);
+                } else {
+                    char literal = regex_escaped_literal(escaped);
+                    if (literal == '\0') {
+                        return false;
+                    }
+                    regex_set_add(atom->bits, (unsigned char)literal);
+                }
+                *pattern += 1;
+                continue;
+            }
+            if ((*pattern)[1] == '-' && (*pattern)[2] != ']' && (*pattern)[2] != '\0') {
+                unsigned char low = (unsigned char)(*pattern)[0];
+                unsigned char high = (unsigned char)(*pattern)[2];
+                unsigned int byte;
+                if (low > high) {
+                    return false;
+                }
+                for (byte = low; byte <= high; ++byte) {
+                    regex_set_add(atom->bits, (unsigned char)byte);
+                }
+                *pattern += 3;
+                continue;
+            }
+            regex_set_add(atom->bits, (unsigned char)**pattern);
+            *pattern += 1;
+        }
+        if (**pattern != ']') {
+            return false;
+        }
+        *pattern += 1;
+        return true;
+    }
+    regex_set_add(atom->bits, (unsigned char)current);
+    *pattern += 1;
+    return true;
+}
+
+static bool regex_atom_matches(const RegexAtom *atom, unsigned char byte) {
+    if (atom->any) {
+        return byte != '\n';
+    }
+    return regex_set_has(atom->bits, byte) != atom->negated;
+}
+
 static bool regex_match_here(const char *pattern, const char *text);
 
-static bool regex_match_star(int c, const char *pattern, const char *text) {
+static bool regex_match_star(const RegexAtom *atom, const char *rest, const char *text) {
     const char *cursor = text;
 
-    do {
-        if (regex_match_here(pattern, cursor)) {
+    if (regex_match_here(rest, cursor)) {
+        return true;
+    }
+    while (*cursor != '\0' && regex_atom_matches(atom, (unsigned char)*cursor)) {
+        cursor += 1;
+        if (regex_match_here(rest, cursor)) {
             return true;
         }
-    } while (*cursor != '\0' && (*cursor++ == c || c == '.'));
-
+    }
     return false;
+}
+
+static bool regex_match_plus(const RegexAtom *atom, const char *rest, const char *text) {
+    const char *cursor = text;
+
+    if (*cursor == '\0' || !regex_atom_matches(atom, (unsigned char)*cursor)) {
+        return false;
+    }
+    cursor += 1;
+    if (regex_match_here(rest, cursor)) {
+        return true;
+    }
+    while (*cursor != '\0' && regex_atom_matches(atom, (unsigned char)*cursor)) {
+        cursor += 1;
+        if (regex_match_here(rest, cursor)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool regex_match_question(const RegexAtom *atom, const char *rest, const char *text) {
+    if (regex_match_here(rest, text)) {
+        return true;
+    }
+    if (*text == '\0' || !regex_atom_matches(atom, (unsigned char)*text)) {
+        return false;
+    }
+    return regex_match_here(rest, text + 1);
 }
 
 static bool regex_match_here(const char *pattern, const char *text) {
-    if (pattern[0] == '\0') {
+    RegexAtom atom;
+    const char *after_atom = pattern;
+
+    regex_match_steps += 1U;
+    if (regex_match_steps > JSRT_MAX_REGEX_STEPS) {
+        regex_match_over_budget = true;
+        return false;
+    }
+    if (*pattern == '\0') {
         return true;
     }
-    if (pattern[1] == '*') {
-        return regex_match_star(pattern[0], pattern + 2, text);
-    }
-    if (pattern[0] == '$' && pattern[1] == '\0') {
+    if (*pattern == '$' && pattern[1] == '\0') {
         return *text == '\0';
     }
-    if (*text != '\0' && (pattern[0] == '.' || pattern[0] == *text)) {
-        return regex_match_here(pattern + 1, text + 1);
+    if (!regex_parse_atom(&after_atom, &atom)) {
+        return false;
+    }
+    switch (*after_atom) {
+        case '*':
+            return regex_match_star(&atom, after_atom + 1, text);
+        case '+':
+            return regex_match_plus(&atom, after_atom + 1, text);
+        case '?':
+            return regex_match_question(&atom, after_atom + 1, text);
+        default:
+            break;
+    }
+    if (*text != '\0' && regex_atom_matches(&atom, (unsigned char)*text)) {
+        return regex_match_here(after_atom, text + 1);
     }
     return false;
 }
 
-static bool regex_match_bounded(const char *pattern, const char *text) {
-    if (pattern[0] == '^') {
-        return regex_match_here(pattern + 1, text);
+static const char *regex_validate_pattern(const char *pattern) {
+    const char *cursor = pattern;
+
+    if (strlen(pattern) > JSRT_MAX_REGEX_PATTERN) {
+        return "the pattern is longer than 1024 bytes";
     }
-    do {
-        if (regex_match_here(pattern, text)) {
+
+    if (*cursor == '^') {
+        cursor += 1;
+    }
+    while (*cursor != '\0') {
+        RegexAtom atom;
+        if (*cursor == '(' || *cursor == ')' || *cursor == '|' || *cursor == '{' || *cursor == '}') {
+            return "groups, alternation, and counted repetition are unsupported";
+        }
+        if (*cursor == '^') {
+            return "the ^ anchor is only supported at the start of a pattern";
+        }
+        if (*cursor == '$') {
+            if (cursor[1] != '\0') {
+                return "the $ anchor is only supported at the end of a pattern";
+            }
+            return NULL;
+        }
+        if (*cursor == '*' || *cursor == '+' || *cursor == '?') {
+            return "a quantifier has no preceding atom";
+        }
+        if (!regex_parse_atom(&cursor, &atom)) {
+            return "the pattern is malformed";
+        }
+        if (*cursor == '*' || *cursor == '+' || *cursor == '?') {
+            cursor += 1;
+            if (*cursor == '*' || *cursor == '+' || *cursor == '?') {
+                return "a quantifier is applied twice";
+            }
+        }
+    }
+    return NULL;
+}
+
+static bool regex_match_bounded(const char *pattern, const char *text) {
+    const char *body = pattern;
+    const char *cursor = text;
+
+    if (*body == '^') {
+        return regex_match_here(body + 1, text);
+    }
+    for (;;) {
+        if (regex_match_here(body, cursor)) {
             return true;
         }
-    } while (*text++ != '\0');
-    return false;
+        if (*cursor == '\0') {
+            return false;
+        }
+        cursor += 1;
+    }
 }
 
 static bool function_property_is_prototype(const char *name) {
@@ -934,7 +1297,9 @@ static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, c
             slice[end - start] = '\0';
             return result_ok(value_string_take(slice));
         }
-        case BUILTIN_REGEX_MATCH:
+        case BUILTIN_REGEX_MATCH: {
+            const char *invalid_pattern;
+
             if (arguments[0].type != VALUE_STRING || arguments[1].type != VALUE_STRING) {
                 return result_runtime_error_at(
                     evaluator,
@@ -945,7 +1310,34 @@ static EvalResult call_native_function(Evaluator *evaluator, const Expr *expr, c
                     "regexMatch() expects text and pattern strings"
                 );
             }
-            return result_ok(value_bool(regex_match_bounded(arguments[1].as.string, arguments[0].as.string)));
+            invalid_pattern = regex_validate_pattern(arguments[1].as.string);
+            if (invalid_pattern != NULL) {
+                return result_runtime_error_at_take(
+                    evaluator,
+                    RUNTIME_ERROR_TYPE,
+                    expr->line,
+                    expr->column,
+                    1,
+                    jsrt_format("unsupported regex pattern: %s", invalid_pattern)
+                );
+            }
+            regex_match_steps = 0U;
+            regex_match_over_budget = false;
+            {
+                bool matched = regex_match_bounded(arguments[1].as.string, arguments[0].as.string);
+                if (regex_match_over_budget) {
+                    return result_runtime_error_at(
+                        evaluator,
+                        RUNTIME_ERROR_TYPE,
+                        expr->line,
+                        expr->column,
+                        1,
+                        "regex pattern is too complex for the bounded matcher"
+                    );
+                }
+                return result_ok(value_bool(matched));
+            }
+        }
     }
 
     return result_runtime_error_at(evaluator, RUNTIME_ERROR_INTERNAL, expr->line, expr->column, 1, "unsupported builtin function");
@@ -1043,6 +1435,13 @@ static void assign_path_init(AssignPath *path) {
 }
 
 static void assign_path_free(AssignPath *path) {
+    size_t i;
+
+    for (i = 0; i < path->count; ++i) {
+        if (path->items[i].index_evaluated) {
+            value_free(path->items[i].index_value);
+        }
+    }
     free(path->items);
     path->items = NULL;
     path->count = 0;
@@ -1077,6 +1476,8 @@ static bool build_assign_path(const Expr *expr, AssignPath *path) {
             step.kind = ASSIGN_STEP_PROPERTY;
             step.property_name = expr->as.property.name;
             step.index_expr = NULL;
+            step.index_value = value_null();
+            step.index_evaluated = false;
             step.line = expr->line;
             step.column = expr->column;
             assign_path_push(path, step);
@@ -1088,6 +1489,8 @@ static bool build_assign_path(const Expr *expr, AssignPath *path) {
             step.kind = ASSIGN_STEP_INDEX;
             step.property_name = NULL;
             step.index_expr = expr->as.index.index;
+            step.index_value = value_null();
+            step.index_evaluated = false;
             step.line = expr->line;
             step.column = expr->column;
             assign_path_push(path, step);
@@ -1212,7 +1615,7 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
         }
 
         {
-            EvalResult index_result = eval_expression(evaluator, step->index_expr);
+            EvalResult index_result = result_ok(value_clone(step->index_value));
             if (index_result.had_error) {
                 gc_temp_root_pop(&assigned_value_root);
                 gc_temp_root_pop(&root_value_root);
@@ -1347,13 +1750,13 @@ static EvalResult assign_into_path(Evaluator *evaluator, Value *root_value, cons
 }
 
 static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
-    EvalResult value_result = eval_expression(evaluator, expr->as.assign.value);
-
-    if (value_result.had_error) {
-        return value_result;
-    }
+    EvalResult value_result;
 
     if (expr->as.assign.target->kind == EXPR_IDENTIFIER) {
+        value_result = eval_expression(evaluator, expr->as.assign.value);
+        if (value_result.had_error) {
+            return value_result;
+        }
         const char *name = expr->as.assign.target->as.identifier.name;
         {
             EnvAssignResult assign_result = env_assign(evaluator->env, name, value_result.value);
@@ -1384,15 +1787,17 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
 
     {
         AssignPath path;
-        Value root_value;
+        Value root_value = value_null();
         EvalResult assign_result;
         GcTempRoot value_root;
         GcTempRoot target_root;
+        GcTempRoot *key_roots = NULL;
+        size_t key_root_count = 0;
+        size_t i;
 
         assign_path_init(&path);
         if (!build_assign_path(expr->as.assign.target, &path) || (!path.root_is_this && path.root_name == NULL)) {
             assign_path_free(&path);
-            value_free(value_result.value);
             return result_runtime_error_at(
                 evaluator,
                 RUNTIME_ERROR_ASSIGNMENT,
@@ -1405,7 +1810,6 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
         if (path.root_is_this) {
             if (!env_get_this(evaluator->env, &root_value)) {
                 assign_path_free(&path);
-                value_free(value_result.value);
                 return result_runtime_error_at(
                     evaluator,
                     RUNTIME_ERROR_INTERNAL,
@@ -1417,7 +1821,6 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
             }
         } else if (!env_get(evaluator->env, path.root_name, &root_value)) {
             assign_path_free(&path);
-            value_free(value_result.value);
             return result_runtime_error_at_take(
                 evaluator,
                 RUNTIME_ERROR_NAME,
@@ -1428,11 +1831,58 @@ static EvalResult eval_assignment(Evaluator *evaluator, const Expr *expr) {
             );
         }
 
-        gc_temp_root_push_value(&value_root, &value_result.value);
+        if (path.count > 0U) {
+            key_roots = jsrt_malloc(sizeof(*key_roots) * path.count);
+        }
         gc_temp_root_push_value(&target_root, &root_value);
+
+        /* JavaScript evaluates the target reference and its index expressions
+         * before the right hand side. Doing it the other way makes the result
+         * depend on mutations the right hand side performs. */
+        for (i = 0; i < path.count; ++i) {
+            AssignStep *step = &path.items[i];
+            EvalResult index_result;
+
+            if (step->kind != ASSIGN_STEP_INDEX) {
+                continue;
+            }
+            index_result = eval_expression(evaluator, step->index_expr);
+            if (index_result.had_error) {
+                gc_temp_root_pop(&target_root);
+                for (; key_root_count > 0U; --key_root_count) {
+                    gc_temp_root_pop(&key_roots[key_root_count - 1U]);
+                }
+                free(key_roots);
+                assign_path_free(&path);
+                value_free(root_value);
+                return index_result;
+            }
+            step->index_value = index_result.value;
+            step->index_evaluated = true;
+            gc_temp_root_push_value(&key_roots[key_root_count], &step->index_value);
+            key_root_count += 1U;
+        }
+
+        value_result = eval_expression(evaluator, expr->as.assign.value);
+        if (value_result.had_error) {
+            gc_temp_root_pop(&target_root);
+            for (; key_root_count > 0U; --key_root_count) {
+                gc_temp_root_pop(&key_roots[key_root_count - 1U]);
+            }
+            free(key_roots);
+            assign_path_free(&path);
+            value_free(root_value);
+            return value_result;
+        }
+
+        gc_temp_root_push_value(&value_root, &value_result.value);
         assign_result = assign_into_path(evaluator, &root_value, &path, value_result.value);
-        gc_temp_root_pop(&target_root);
         gc_temp_root_pop(&value_root);
+        for (; key_root_count > 0U; --key_root_count) {
+            gc_temp_root_pop(&key_roots[key_root_count - 1U]);
+        }
+        gc_temp_root_pop(&target_root);
+        free(key_roots);
         assign_path_free(&path);
         if (assign_result.had_error) {
             value_free(root_value);
@@ -1480,6 +1930,18 @@ static void collect_garbage(Evaluator *evaluator, const Value *root_value) {
     }
     free(job_roots);
     free(active_roots);
+}
+
+/* Copy bindings into a fresh environment. For-statement heads with lexical
+ * declarations get a new copy of their bindings on every iteration, so a
+ * closure made in one iteration keeps the values of that iteration. */
+static void env_copy_entries(Env *destination, const Env *source) {
+    const EnvEntry *entry = source->head;
+
+    while (entry != NULL) {
+        env_define(destination, entry->name, entry->value, entry->is_const);
+        entry = entry->next;
+    }
 }
 
 static EvalResult execute_block(Evaluator *evaluator, const StmtArray *statements, Env *env) {
@@ -1672,6 +2134,17 @@ static EvalResult invoke_function(
         );
     }
 
+    if (!function->is_native && evaluator->call_depth >= JSRT_MAX_CALL_DEPTH) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_INTERNAL,
+            surface_expr->line,
+            surface_expr->column,
+            1,
+            "maximum call depth exceeded"
+        );
+    }
+
     arguments = jsrt_malloc(sizeof(*arguments) * arguments_expr->count);
     if (arguments_expr->count > 0) {
         argument_roots = jsrt_malloc(sizeof(*argument_roots) * arguments_expr->count);
@@ -1733,7 +2206,9 @@ static EvalResult invoke_function(
         int previous_switch_depth = evaluator->switch_depth;
         evaluator->loop_depth = 0;
         evaluator->switch_depth = 0;
+        evaluator->call_depth += 1;
         result = execute_block(evaluator, body, call_env);
+        evaluator->call_depth -= 1;
         evaluator->loop_depth = previous_loop_depth;
         evaluator->switch_depth = previous_switch_depth;
     }
@@ -1877,17 +2352,30 @@ static EvalResult eval_object_literal(Evaluator *evaluator, const Expr *expr) {
     Value object_value;
     GcTempRoot object_root;
 
+    object->count = 0;
     object_value = value_object_take(object);
     gc_temp_root_push_value(&object_root, &object_value);
 
-    for (i = 0; i < object->count; ++i) {
+    for (i = 0; i < expr->as.object.properties.count; ++i) {
+        const char *key = expr->as.object.properties.items[i].key;
         EvalResult property_value = eval_expression(evaluator, expr->as.object.properties.items[i].value);
+        ptrdiff_t existing;
+
         if (property_value.had_error) {
             gc_temp_root_pop(&object_root);
             return property_value;
         }
-        object->items[i].key = jsrt_strdup(expr->as.object.properties.items[i].key);
-        object->items[i].value = property_value.value;
+        /* A duplicate key keeps the last value and appears once, as in
+         * JavaScript object literals. */
+        existing = object_find_key(object, key);
+        if (existing >= 0) {
+            value_free(object->items[(size_t)existing].value);
+            object->items[(size_t)existing].value = property_value.value;
+        } else {
+            object->items[object->count].key = jsrt_strdup(key);
+            object->items[object->count].value = property_value.value;
+            object->count += 1U;
+        }
     }
 
     gc_temp_root_pop(&object_root);
@@ -2258,9 +2746,17 @@ static EvalResult load_module_record(Evaluator *evaluator, const Stmt *import_st
         record->parsed = true;
 
         {
+            AstUnit *module_unit = ast_unit_create(&record->program);
             GcTempRoot importer_root;
+            env_attach_unit(record->env, module_unit);
             gc_temp_root_push_env(&importer_root, evaluator->root_env);
-            module_result = eval_program_internal(&record->program, record->source, record->env, record->path, &record->exports);
+            module_result = eval_program_internal(
+                &module_unit->program,
+                record->source,
+                record->env,
+                record->path,
+                &record->exports
+            );
             gc_temp_root_pop(&importer_root);
         }
         record->loading = false;
@@ -2337,6 +2833,17 @@ static EvalResult execute_import_statement(Evaluator *evaluator, const Stmt *stm
 }
 
 static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
+    if (eval_interrupt_requested()) {
+        return result_runtime_error_at(
+            evaluator,
+            RUNTIME_ERROR_INTERNAL,
+            stmt->line,
+            stmt->column,
+            1,
+            "execution interrupted"
+        );
+    }
+
     switch (stmt->kind) {
         case STMT_EXPR:
             return eval_expression(evaluator, stmt->as.expr.expression);
@@ -2422,6 +2929,7 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
             Env *previous_env = evaluator->env;
             ActiveEnvScope active_scope;
             EvalResult result = result_ok(value_null());
+            bool per_iteration = stmt->as.for_stmt.init != NULL && stmt->as.for_stmt.init->kind == STMT_VAR;
 
             active_scope.env = env_create(evaluator->env);
             active_scope.previous = evaluator->active_envs;
@@ -2477,6 +2985,13 @@ static EvalResult execute_statement(Evaluator *evaluator, const Stmt *stmt) {
                     }
 
                     value_free(body.value);
+
+                    if (per_iteration) {
+                        Env *iteration_env = env_create(previous_env);
+                        env_copy_entries(iteration_env, active_scope.env);
+                        active_scope.env = iteration_env;
+                        evaluator->env = iteration_env;
+                    }
 
                     if (stmt->as.for_stmt.increment != NULL) {
                         EvalResult increment = eval_expression(evaluator, stmt->as.for_stmt.increment);
@@ -2691,6 +3206,7 @@ static EvalResult eval_program_internal(
     evaluator.active_envs = &active_scope;
     evaluator.loop_depth = 0;
     evaluator.switch_depth = 0;
+    evaluator.call_depth = 0;
     define_global_builtins(env);
     env_set_this(env, value_null());
 
@@ -2724,16 +3240,23 @@ static EvalResult eval_program_internal(
     return result;
 }
 
-EvalResult eval_program_with_path(const StmtArray *program, const char *source, Env *env, const char *module_path) {
+EvalResult eval_program_with_path(StmtArray *program, const char *source, Env *env, const char *module_path) {
     StringArray exports;
     EvalResult result;
+    AstUnit *unit;
+
+    if (program == NULL || env == NULL) {
+        return result_ok(value_null());
+    }
+    unit = ast_unit_create(program);
+    env_attach_unit(env, unit);
 
     string_array_init(&exports);
-    result = eval_program_internal(program, source, env, module_path, &exports);
+    result = eval_program_internal(&unit->program, source, env, module_path, &exports);
     string_array_free(&exports);
     return result;
 }
 
-EvalResult eval_program(const StmtArray *program, const char *source, Env *env) {
+EvalResult eval_program(StmtArray *program, const char *source, Env *env) {
     return eval_program_with_path(program, source, env, NULL);
 }

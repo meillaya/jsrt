@@ -38,6 +38,14 @@ typedef struct {
     size_t capacity;
 } StmtArray;
 
+/* Parsed program with the lifetime of the environment that evaluated it.
+ * Functions hold pointers into these statements, so an environment owns its
+ * units until the garbage collector sweeps the environment itself. */
+typedef struct AstUnit {
+    StmtArray program;
+    struct AstUnit *next;
+} AstUnit;
+
 typedef struct {
     Expr *value;
     StmtArray statements;
@@ -270,6 +278,11 @@ void import_specifier_array_free(ImportSpecifierArray *array);
 void stmt_array_init(StmtArray *array);
 void stmt_array_push(StmtArray *array, Stmt *stmt);
 void stmt_array_free(StmtArray *array);
+
+/* Take ownership of program and return a unit that frees it when released.
+ * The caller's StmtArray is reset, so a later stmt_array_free is a no-op. */
+AstUnit *ast_unit_create(StmtArray *program);
+void ast_unit_free_all(AstUnit *units);
 
 Expr *ast_new_literal_number(double value, int line, int column);
 Expr *ast_new_literal_bool(bool value, int line, int column);

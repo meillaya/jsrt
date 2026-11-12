@@ -199,6 +199,37 @@ static TokenType identifier_type(const char *lexeme) {
     return TOKEN_IDENTIFIER;
 }
 
+static int string_literal_error(
+    const char *source,
+    char **error_message,
+    TokenArray *tokens,
+    char *buffer,
+    int token_line,
+    int token_column,
+    const char *message
+) {
+    free(buffer);
+    *error_message = format_source_diagnostic("Lexer error", source, token_line, token_column, 1, message);
+    token_array_free(tokens);
+    return 0;
+}
+
+static bool hex_digit_value(char digit, unsigned int *out_value) {
+    if (digit >= '0' && digit <= '9') {
+        *out_value = (unsigned int)(digit - '0');
+        return true;
+    }
+    if (digit >= 'a' && digit <= 'f') {
+        *out_value = (unsigned int)(digit - 'a') + 10U;
+        return true;
+    }
+    if (digit >= 'A' && digit <= 'F') {
+        *out_value = (unsigned int)(digit - 'A') + 10U;
+        return true;
+    }
+    return false;
+}
+
 static int lex_string_literal(
     const char *source,
     const char **cursor,
@@ -206,7 +237,8 @@ static int lex_string_literal(
     TokenArray *tokens,
     char **error_message,
     int token_line,
-    int token_column
+    int token_column,
+    char quote
 ) {
     size_t capacity = 16U;
     size_t length = 0U;
@@ -215,67 +247,169 @@ static int lex_string_literal(
     *cursor += 1;
     *column += 1;
 
-    while (**cursor != '\0' && **cursor != '"') {
+    while (**cursor != '\0' && **cursor != quote) {
         char ch = **cursor;
+        char appended[4];
+        size_t appended_count = 1U;
+
         if (ch == '\n') {
-            free(buffer);
-            *error_message = format_source_diagnostic(
-                "Lexer error",
+            return string_literal_error(
                 source,
+                error_message,
+                tokens,
+                buffer,
                 token_line,
                 token_column,
-                1,
                 "unterminated string literal"
             );
-            token_array_free(tokens);
-            return 0;
         }
         if (ch == '\\') {
             *cursor += 1;
             *column += 1;
             ch = **cursor;
-            if (ch == '\0') {
-                free(buffer);
-                *error_message = format_source_diagnostic(
-                    "Lexer error",
+            if (ch == '\0' || ch == '\n') {
+                return string_literal_error(
                     source,
+                    error_message,
+                    tokens,
+                    buffer,
                     token_line,
                     token_column,
-                    1,
                     "unterminated string literal"
                 );
-                token_array_free(tokens);
-                return 0;
             }
             switch (ch) {
                 case 'n': ch = '\n'; break;
                 case 't': ch = '\t'; break;
+                case 'r': ch = '\r'; break;
+                case 'b': ch = '\b'; break;
+                case 'f': ch = '\f'; break;
+                case 'v': ch = '\v'; break;
+                case '\'': ch = '\''; break;
                 case '"': ch = '"'; break;
                 case '\\': ch = '\\'; break;
-                default: break;
+                case 'x': {
+                    unsigned int high;
+                    unsigned int low;
+                    unsigned int byte;
+                    if (!hex_digit_value(cursor[0][1], &high) || !hex_digit_value(cursor[0][2], &low)) {
+                        return string_literal_error(
+                            source,
+                            error_message,
+                            tokens,
+                            buffer,
+                            token_line,
+                            token_column,
+                            "invalid hexadecimal escape sequence"
+                        );
+                    }
+                    byte = (high << 4U) | low;
+                    if (byte == 0U) {
+                        return string_literal_error(
+                            source,
+                            error_message,
+                            tokens,
+                            buffer,
+                            token_line,
+                            token_column,
+                            "NUL bytes are not supported in strings"
+                        );
+                    }
+                    ch = (char)byte;
+                    *cursor += 2;
+                    *column += 2;
+                    break;
+                }
+                case 'u': {
+                    unsigned int codepoint = 0U;
+                    unsigned int digit;
+                    size_t index;
+                    for (index = 1U; index <= 4U; ++index) {
+                        if (!hex_digit_value(cursor[0][index], &digit)) {
+                            return string_literal_error(
+                                source,
+                                error_message,
+                                tokens,
+                                buffer,
+                                token_line,
+                                token_column,
+                                "invalid unicode escape sequence"
+                            );
+                        }
+                        codepoint = (codepoint << 4U) | digit;
+                    }
+                    *cursor += 4;
+                    *column += 4;
+                    if (codepoint == 0U) {
+                        return string_literal_error(
+                            source,
+                            error_message,
+                            tokens,
+                            buffer,
+                            token_line,
+                            token_column,
+                            "NUL bytes are not supported in strings"
+                        );
+                    }
+                    if (codepoint >= 0xD800U && codepoint <= 0xDFFFU) {
+                        return string_literal_error(
+                            source,
+                            error_message,
+                            tokens,
+                            buffer,
+                            token_line,
+                            token_column,
+                            "surrogate escape sequences are unsupported"
+                        );
+                    }
+                    if (codepoint < 0x80U) {
+                        ch = (char)codepoint;
+                    } else if (codepoint < 0x800U) {
+                        appended[0] = (char)(0xC0U | (codepoint >> 6U));
+                        appended[1] = (char)(0x80U | (codepoint & 0x3FU));
+                        appended_count = 2U;
+                    } else {
+                        appended[0] = (char)(0xE0U | (codepoint >> 12U));
+                        appended[1] = (char)(0x80U | ((codepoint >> 6U) & 0x3FU));
+                        appended[2] = (char)(0x80U | (codepoint & 0x3FU));
+                        appended_count = 3U;
+                    }
+                    break;
+                }
+                default:
+                    /* Identity escapes such as \q keep the character, which
+                     * matches how JavaScript treats an unrecognized escape. */
+                    break;
             }
         }
         if (length + 1U >= capacity) {
             capacity *= 2U;
             buffer = jsrt_realloc(buffer, capacity);
         }
-        buffer[length++] = ch;
+        if (appended_count == 1U) {
+            buffer[length++] = ch;
+        } else {
+            while (length + appended_count >= capacity) {
+                capacity *= 2U;
+                buffer = jsrt_realloc(buffer, capacity);
+            }
+            memcpy(buffer + length, appended, appended_count);
+            length += appended_count;
+        }
         *cursor += 1;
         *column += 1;
     }
 
-    if (**cursor != '"') {
-        free(buffer);
-        *error_message = format_source_diagnostic(
-            "Lexer error",
+    if (**cursor != quote) {
+        return string_literal_error(
             source,
+            error_message,
+            tokens,
+            buffer,
             token_line,
             token_column,
-            1,
             "unterminated string literal"
         );
-        token_array_free(tokens);
-        return 0;
     }
 
     buffer[length] = '\0';
@@ -318,6 +452,36 @@ int lex_source(const char *source, TokenArray *tokens, char **error_message) {
                 ++cursor;
                 ++column;
             }
+            continue;
+        }
+
+        if (*cursor == '/' && cursor[1] == '*') {
+            cursor += 2;
+            column += 2;
+            while (*cursor != '\0' && !(*cursor == '*' && cursor[1] == '/')) {
+                if (*cursor == '\n') {
+                    ++cursor;
+                    ++line;
+                    column = 1;
+                } else {
+                    ++cursor;
+                    ++column;
+                }
+            }
+            if (*cursor == '\0') {
+                *error_message = format_source_diagnostic(
+                    "Lexer error",
+                    source,
+                    token_line,
+                    token_column,
+                    2,
+                    "unterminated block comment"
+                );
+                token_array_free(tokens);
+                return 0;
+            }
+            cursor += 2;
+            column += 2;
             continue;
         }
 
@@ -435,7 +599,12 @@ int lex_source(const char *source, TokenArray *tokens, char **error_message) {
                 }
                 continue;
             case '"':
-                if (!lex_string_literal(source, &cursor, &column, tokens, error_message, token_line, token_column)) {
+                if (!lex_string_literal(source, &cursor, &column, tokens, error_message, token_line, token_column, '"')) {
+                    return 0;
+                }
+                continue;
+            case '\'':
+                if (!lex_string_literal(source, &cursor, &column, tokens, error_message, token_line, token_column, '\'')) {
                     return 0;
                 }
                 continue;

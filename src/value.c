@@ -22,10 +22,28 @@ typedef struct ValueEqualityFrame {
     const void *right;
     const struct ValueEqualityFrame *previous;
 } ValueEqualityFrame;
-static char *value_to_string_internal(Value value, const ValueStringifyFrame *frames);
-static bool value_equals_internal(Value left, Value right, const ValueEqualityFrame *frames);
+/* Both structural operations recurse over aggregates. The depth limit keeps a
+ * hostile shape from overflowing the C stack, and the trace keeps shared
+ * subgraphs from being compared again. */
+#define JSRT_MAX_VALUE_DEPTH 512
+#define JSRT_MAX_STRINGIFY_BYTES (1U << 20)
+
+typedef struct ValueEqualityTrace {
+    const void *left;
+    const void *right;
+    struct ValueEqualityTrace *next;
+} ValueEqualityTrace;
+
+typedef struct {
+    char *data;
+    size_t length;
+    size_t capacity;
+    bool truncated;
+} StringifyBuffer;
+
+static void stringify_value(Value value, const ValueStringifyFrame *frames, int depth, StringifyBuffer *buffer);
+static bool value_equals_internal(Value left, Value right, ValueEqualityTrace **trace, int depth);
 static bool stringify_frame_contains(const ValueStringifyFrame *frames, const void *aggregate);
-static bool equality_frame_contains(const ValueEqualityFrame *frames, const void *left, const void *right);
 
 Value value_number(double number) {
     Value value;
@@ -108,7 +126,7 @@ bool value_is_truthy(Value value) {
         case VALUE_NULL:
             return false;
         case VALUE_NUMBER:
-            return fabs(value.as.number) > 0.000000001;
+            return value.as.number != 0.0;
         case VALUE_STRING:
             return value.as.string[0] != '\0';
         case VALUE_FUNCTION:
@@ -129,19 +147,30 @@ static bool stringify_frame_contains(const ValueStringifyFrame *frames, const vo
     return false;
 }
 
-static bool equality_frame_contains(const ValueEqualityFrame *frames, const void *left, const void *right) {
-    while (frames != NULL) {
-        if (frames->left == left && frames->right == right) {
+static bool equality_trace_contains(const ValueEqualityTrace *trace, const void *left, const void *right) {
+    while (trace != NULL) {
+        if (trace->left == left && trace->right == right) {
             return true;
         }
-        frames = frames->previous;
+        trace = trace->next;
     }
     return false;
 }
 
-static bool array_equals_internal(const JsArray *left, const JsArray *right, const ValueEqualityFrame *frames) {
+static void equality_trace_free(ValueEqualityTrace *trace) {
+    while (trace != NULL) {
+        ValueEqualityTrace *next = trace->next;
+        free(trace);
+        trace = next;
+    }
+}
+
+static bool array_equals_internal(const JsArray *left, const JsArray *right, ValueEqualityTrace **trace, int depth) {
     size_t i;
 
+    if (depth > JSRT_MAX_VALUE_DEPTH) {
+        return false;
+    }
     if (left == right) {
         return true;
     }
@@ -151,24 +180,31 @@ static bool array_equals_internal(const JsArray *left, const JsArray *right, con
     if (left->count != right->count) {
         return false;
     }
-    if (equality_frame_contains(frames, left, right)) {
+    if (equality_trace_contains(*trace, left, right)) {
         return true;
     }
 
     {
-        ValueEqualityFrame frame = {left, right, frames};
-        for (i = 0; i < left->count; ++i) {
-            if (!value_equals_internal(left->items[i], right->items[i], &frame)) {
-                return false;
-            }
+        ValueEqualityTrace *entry = jsrt_malloc(sizeof(*entry));
+        entry->left = left;
+        entry->right = right;
+        entry->next = *trace;
+        *trace = entry;
+    }
+    for (i = 0; i < left->count; ++i) {
+        if (!value_equals_internal(left->items[i], right->items[i], trace, depth + 1)) {
+            return false;
         }
     }
     return true;
 }
 
-static bool object_equals_internal(const JsObject *left, const JsObject *right, const ValueEqualityFrame *frames) {
+static bool object_equals_internal(const JsObject *left, const JsObject *right, ValueEqualityTrace **trace, int depth) {
     size_t i;
 
+    if (depth > JSRT_MAX_VALUE_DEPTH) {
+        return false;
+    }
     if (left == right) {
         return true;
     }
@@ -178,31 +214,36 @@ static bool object_equals_internal(const JsObject *left, const JsObject *right, 
     if (left->count != right->count) {
         return false;
     }
-    if (equality_frame_contains(frames, left, right)) {
+    if (equality_trace_contains(*trace, left, right)) {
         return true;
     }
+
     {
-        ValueEqualityFrame frame = {left, right, frames};
-        for (i = 0; i < left->count; ++i) {
-            if (strcmp(left->items[i].key, right->items[i].key) != 0) {
-                return false;
-            }
-            if (!value_equals_internal(left->items[i].value, right->items[i].value, &frame)) {
-                return false;
-            }
+        ValueEqualityTrace *entry = jsrt_malloc(sizeof(*entry));
+        entry->left = left;
+        entry->right = right;
+        entry->next = *trace;
+        *trace = entry;
+    }
+    for (i = 0; i < left->count; ++i) {
+        if (strcmp(left->items[i].key, right->items[i].key) != 0) {
+            return false;
+        }
+        if (!value_equals_internal(left->items[i].value, right->items[i].value, trace, depth + 1)) {
+            return false;
         }
     }
     return true;
 }
 
-static bool value_equals_internal(Value left, Value right, const ValueEqualityFrame *frames) {
+static bool value_equals_internal(Value left, Value right, ValueEqualityTrace **trace, int depth) {
     if (left.type != right.type) {
         return false;
     }
 
     switch (left.type) {
         case VALUE_NUMBER:
-            return fabs(left.as.number - right.as.number) < 0.000000001;
+            return left.as.number == right.as.number;
         case VALUE_BOOL:
             return left.as.boolean == right.as.boolean;
         case VALUE_NULL:
@@ -212,100 +253,172 @@ static bool value_equals_internal(Value left, Value right, const ValueEqualityFr
         case VALUE_FUNCTION:
             return left.as.function == right.as.function;
         case VALUE_ARRAY:
-            return array_equals_internal(left.as.array, right.as.array, frames);
+            return array_equals_internal(left.as.array, right.as.array, trace, depth);
         case VALUE_OBJECT:
-            return object_equals_internal(left.as.object, right.as.object, frames);
+            return object_equals_internal(left.as.object, right.as.object, trace, depth);
     }
     return false;
 }
 
 bool value_equals(Value left, Value right) {
-    return value_equals_internal(left, right, NULL);
+    ValueEqualityTrace *trace = NULL;
+    bool equal = value_equals_internal(left, right, &trace, 0);
+
+    equality_trace_free(trace);
+    return equal;
 }
 
-static char *join_strings(char *prefix, const char *suffix) {
-    char *joined = jsrt_format("%s%s", prefix, suffix);
-    free(prefix);
-    return joined;
+static void stringify_buffer_init(StringifyBuffer *buffer) {
+    buffer->capacity = 64U;
+    buffer->data = jsrt_malloc(buffer->capacity);
+    buffer->data[0] = '\0';
+    buffer->length = 0U;
+    buffer->truncated = false;
 }
 
-static char *array_to_string(const JsArray *array, const ValueStringifyFrame *frames) {
+static void stringify_append(StringifyBuffer *buffer, const char *text, size_t length) {
+    if (buffer->truncated) {
+        return;
+    }
+    if (buffer->length + length > JSRT_MAX_STRINGIFY_BYTES) {
+        buffer->truncated = true;
+        return;
+    }
+    while (buffer->length + length + 1U > buffer->capacity) {
+        buffer->capacity *= 2U;
+    }
+    buffer->data = jsrt_realloc(buffer->data, buffer->capacity);
+    memcpy(buffer->data + buffer->length, text, length);
+    buffer->length += length;
+    buffer->data[buffer->length] = '\0';
+}
+
+static void stringify_append_text(StringifyBuffer *buffer, const char *text) {
+    stringify_append(buffer, text, strlen(text));
+}
+
+static char *stringify_finish(StringifyBuffer *buffer) {
+    if (buffer->truncated) {
+        free(buffer->data);
+        return jsrt_strdup("<output limit>");
+    }
+    return buffer->data;
+}
+
+static void stringify_array(const JsArray *array, const ValueStringifyFrame *frames, int depth, StringifyBuffer *buffer) {
     size_t i;
-    char *result = jsrt_strdup("[");
     ValueStringifyFrame frame = {array, frames};
+
+    stringify_append_text(buffer, "[");
     for (i = 0; i < array->count; ++i) {
-        char *item = value_to_string_internal(array->items[i], &frame);
-        if (i > 0) {
-            result = join_strings(result, ", ");
+        if (buffer->truncated) {
+            return;
         }
-        result = join_strings(result, item);
-        free(item);
+        if (i > 0) {
+            stringify_append_text(buffer, ", ");
+        }
+        stringify_value(array->items[i], &frame, depth + 1, buffer);
     }
-    result = join_strings(result, "]");
-    return result;
+    stringify_append_text(buffer, "]");
 }
 
-static char *object_to_string(const JsObject *object, const ValueStringifyFrame *frames) {
+static void stringify_object(const JsObject *object, const ValueStringifyFrame *frames, int depth, StringifyBuffer *buffer) {
     size_t i;
-    char *result = jsrt_strdup("{");
     ValueStringifyFrame frame = {object, frames};
+
+    stringify_append_text(buffer, "{");
     for (i = 0; i < object->count; ++i) {
-        char *value_text = value_to_string_internal(object->items[i].value, &frame);
-        char *pair = jsrt_format("%s: %s", object->items[i].key, value_text);
-        if (i > 0) {
-            result = join_strings(result, ", ");
+        if (buffer->truncated) {
+            return;
         }
-        result = join_strings(result, pair);
-        free(value_text);
-        free(pair);
+        if (i > 0) {
+            stringify_append_text(buffer, ", ");
+        }
+        stringify_append_text(buffer, object->items[i].key);
+        stringify_append_text(buffer, ": ");
+        stringify_value(object->items[i].value, &frame, depth + 1, buffer);
     }
-    result = join_strings(result, "}");
-    return result;
+    stringify_append_text(buffer, "}");
 }
 
-static char *value_to_string_internal(Value value, const ValueStringifyFrame *frames) {
+static void stringify_function(const JsFunction *function, StringifyBuffer *buffer) {
+    const char *name = NULL;
+
+    if (function != NULL && function->is_native && function->native_name != NULL) {
+        stringify_append_text(buffer, "<builtin ");
+        stringify_append_text(buffer, function->native_name);
+        stringify_append_text(buffer, ">");
+        return;
+    }
+    if (function != NULL && function->bytecode != NULL) {
+        name = function->bytecode->name;
+    } else if (function != NULL && function->declaration != NULL && function->declaration->kind == STMT_FUNCTION) {
+        name = function->declaration->as.function.name;
+    } else if (function != NULL && function->expression != NULL) {
+        name = function->expression->as.function.name;
+    } else if (function != NULL) {
+        name = function->name;
+    }
+    if (name != NULL) {
+        stringify_append_text(buffer, "<function ");
+        stringify_append_text(buffer, name);
+        stringify_append_text(buffer, ">");
+    } else {
+        stringify_append_text(buffer, "<function>");
+    }
+}
+
+static void stringify_value(Value value, const ValueStringifyFrame *frames, int depth, StringifyBuffer *buffer) {
+    if (buffer->truncated) {
+        return;
+    }
+    if (depth > JSRT_MAX_VALUE_DEPTH) {
+        stringify_append_text(buffer, "<depth limit>");
+        return;
+    }
+
     switch (value.type) {
-        case VALUE_NUMBER:
-            return jsrt_format("%.15g", value.as.number);
+        case VALUE_NUMBER: {
+            char *text = jsrt_format("%.15g", value.as.number);
+            stringify_append_text(buffer, text);
+            free(text);
+            break;
+        }
         case VALUE_BOOL:
-            return jsrt_strdup(value.as.boolean ? "true" : "false");
+            stringify_append_text(buffer, value.as.boolean ? "true" : "false");
+            break;
         case VALUE_NULL:
-            return jsrt_strdup("null");
+            stringify_append_text(buffer, "null");
+            break;
         case VALUE_STRING:
-            return jsrt_strdup(value.as.string);
+            stringify_append_text(buffer, value.as.string);
+            break;
         case VALUE_FUNCTION:
-            if (value.as.function != NULL && value.as.function->is_native && value.as.function->native_name != NULL) {
-                return jsrt_format("<builtin %s>", value.as.function->native_name);
-            }
-            if (value.as.function != NULL && value.as.function->bytecode != NULL &&
-                value.as.function->bytecode->name != NULL) {
-                return jsrt_format("<function %s>", value.as.function->bytecode->name);
-            }
-            if (value.as.function != NULL && value.as.function->declaration != NULL &&
-                value.as.function->declaration->kind == STMT_FUNCTION) {
-                return jsrt_format("<function %s>", value.as.function->declaration->as.function.name);
-            }
-            if (value.as.function != NULL && value.as.function->expression != NULL &&
-                value.as.function->expression->as.function.name != NULL) {
-                return jsrt_format("<function %s>", value.as.function->expression->as.function.name);
-            }
-            return jsrt_strdup("<function>");
+            stringify_function(value.as.function, buffer);
+            break;
         case VALUE_ARRAY:
             if (stringify_frame_contains(frames, value.as.array)) {
-                return jsrt_strdup("<cycle>");
+                stringify_append_text(buffer, "<cycle>");
+            } else if (value.as.array != NULL) {
+                stringify_array(value.as.array, frames, depth, buffer);
             }
-            return array_to_string(value.as.array, frames);
+            break;
         case VALUE_OBJECT:
             if (stringify_frame_contains(frames, value.as.object)) {
-                return jsrt_strdup("<cycle>");
+                stringify_append_text(buffer, "<cycle>");
+            } else if (value.as.object != NULL) {
+                stringify_object(value.as.object, frames, depth, buffer);
             }
-            return object_to_string(value.as.object, frames);
+            break;
     }
-    return jsrt_strdup("<unknown>");
 }
 
 char *value_to_string(Value value) {
-    return value_to_string_internal(value, NULL);
+    StringifyBuffer buffer;
+
+    stringify_buffer_init(&buffer);
+    stringify_value(value, NULL, 0, &buffer);
+    return stringify_finish(&buffer);
 }
 
 void value_retain(Value value) {

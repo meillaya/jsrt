@@ -11,6 +11,19 @@
 #include "jsrt/value.h"
 #include "test.h"
 
+static int interrupt_check_calls = 0;
+
+static bool interrupt_after_three_calls(void *user_data) {
+    (void)user_data;
+    interrupt_check_calls += 1;
+    return interrupt_check_calls > 3;
+}
+
+static bool never_interrupt(void *user_data) {
+    (void)user_data;
+    return false;
+}
+
 static EvalResult evaluate_source(const char *source, char **parse_error) {
     TokenArray tokens;
     StmtArray program;
@@ -1519,6 +1532,191 @@ void run_eval_tests(TestContext *ctx) {
     result = evaluate_source("class Box {}\nclass Box {}\n", &error);
     EXPECT_TRUE(ctx, result.had_error);
     EXPECT_TRUE(ctx, strstr(result.error_message, "redeclaration of 'Box' in the same scope") != NULL);
+    eval_result_free(&result);
+
+    /* Deep recursion reports an error at the limit instead of overflowing the
+     * host stack. One level below the limit still runs. */
+    result = evaluate_source(
+        "let f = function(n) { if (n <= 0) { return 0; } return f(n - 1) + 1; };\n"
+        "f(300);\n",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "maximum call depth exceeded") != NULL);
+    EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_INTERNAL);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let f = function(n) { if (n <= 0) { return 0; } return f(n - 1) + 1; };\n"
+        "f(100);\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 100.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* A last statement may omit its terminator at end of file or before a
+     * closing brace. */
+    result = evaluate_source("1 + 2", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 3.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("function one() { return 1 }\none();", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* A host interrupt hook stops a runaway loop at a statement boundary. */
+    interrupt_check_calls = 0;
+    eval_set_interrupt_check(interrupt_after_three_calls, NULL);
+    result = evaluate_source("let i = 0; while (i < 100000) { i = i + 1; } i;", &error);
+    eval_set_interrupt_check(NULL, NULL);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "execution interrupted") != NULL);
+    EXPECT_INT_EQ(ctx, result.runtime_error_kind, RUNTIME_ERROR_INTERNAL);
+    eval_result_free(&result);
+
+    /* A hook that never fires leaves the program alone. */
+    eval_set_interrupt_check(never_interrupt, NULL);
+    result = evaluate_source("1 + 2", &error);
+    eval_set_interrupt_check(NULL, NULL);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 3.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* Closures created in a for head see that iteration's value, not the
+     * final one. */
+    result = evaluate_source(
+        "let fns = {};\n"
+        "for (let i = 0; i < 3; i = i + 1) {\n"
+        "  fns[\"k\" + i] = function () { return i; };\n"
+        "}\n"
+        "fns[\"k0\"]() + fns[\"k1\"]() + fns[\"k2\"]();\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 3.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* The assignment target and its index expressions are evaluated before
+     * the right hand side. */
+    result = evaluate_source(
+        "let a = [0, 0];\n"
+        "let i = 0;\n"
+        "a[i] = (i = 1) + 10;\n"
+        "a[0] * 100 + a[1];\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 1100.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* Numbers compare exactly, and any nonzero number is truthy. */
+    result = evaluate_source(
+        "!(0.1 + 0.2 == 0.3) && !(1.0000000001 == 1) && 0.0000000001 != 0;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* Duplicate object literal keys keep the last value and one entry. */
+    result = evaluate_source("let o = {a: 1, a: 2};\no.a * 10 + len(o);", &error);
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_DOUBLE_EQ(ctx, result.value.as.number, 21.0);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    /* Regex matching supports classes, quantifiers, and anchors, and rejects
+     * syntax it does not implement instead of matching it literally. */
+    result = evaluate_source(
+        "regexMatch(\"abc123\", \"[a-z]+[0-9]+\") && regexMatch(\"ab\", \"a?b\") && "
+        "regexMatch(\"x1\", \"\\\\w\\\\d\") && regexMatch(\"hello\", \"^h.*o$\");\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source("regexMatch(\"abc\", \"(a)\");", &error);
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "unsupported regex pattern") != NULL);
+    eval_result_free(&result);
+
+    /* The matcher reports its own budget instead of hanging on a pattern that
+     * backtracks exponentially. */
+    result = evaluate_source(
+        "regexMatch(\"aaaaaaaaaaaaaaaaaaaaaaaa\", \"a*a*a*a*a*a*a*a*a*a*b\");",
+        &error
+    );
+    EXPECT_TRUE(ctx, result.had_error);
+    EXPECT_TRUE(ctx, strstr(result.error_message, "regex pattern is too complex") != NULL);
+    eval_result_free(&result);
+
+    {
+        size_t pattern_length = 1100U;
+        char *source = malloc(pattern_length + 32U);
+        size_t cursor = 0U;
+        size_t index;
+
+        EXPECT_TRUE(ctx, source != NULL);
+        if (source != NULL) {
+            memcpy(source + cursor, "regexMatch(\"a\", \"", 17U);
+            cursor += 17U;
+            for (index = 0; index < pattern_length; ++index) {
+                source[cursor++] = 'a';
+            }
+            memcpy(source + cursor, "\");", 3U);
+            cursor += 3U;
+            source[cursor] = '\0';
+
+            result = evaluate_source(source, &error);
+            EXPECT_TRUE(ctx, result.had_error);
+            EXPECT_TRUE(ctx, strstr(result.error_message, "the pattern is longer than 1024 bytes") != NULL);
+            eval_result_free(&result);
+            free(source);
+        }
+    }
+
+    /* Deep and highly shared values stay bounded instead of overflowing the C
+     * stack or expanding without limit. */
+    result = evaluate_source(
+        "let a = [];\n"
+        "let b = [];\n"
+        "for (let i = 0; i < 2000; i = i + 1) { a = [a]; b = [b]; }\n"
+        "a == b;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    EXPECT_INT_EQ(ctx, result.value.type, VALUE_BOOL);
+    EXPECT_FALSE(ctx, result.value.as.boolean);
+    value_free(result.value);
+    eval_result_free(&result);
+
+    result = evaluate_source(
+        "let a = [];\n"
+        "for (let i = 0; i < 40; i = i + 1) { a = [a, a]; }\n"
+        "a;\n",
+        &error
+    );
+    EXPECT_FALSE(ctx, result.had_error);
+    {
+        char *text = value_to_string(result.value);
+        EXPECT_TRUE(ctx, text != NULL);
+        EXPECT_TRUE(ctx, strstr(text, "<output limit>") != NULL);
+        free(text);
+    }
+    value_free(result.value);
     eval_result_free(&result);
 
     assert_example_output(ctx, "examples/arithmetic.js", "7\n");

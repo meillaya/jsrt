@@ -103,4 +103,51 @@ void run_lexer_tests(TestContext *ctx) {
     if (error != NULL) {
         free(error);
     }
+
+    EXPECT_TRUE(ctx, lex_source("/* one */ let x = 1; /* a\nmulti-line comment */ x;", &tokens, &error));
+    if (error != NULL) {
+        free(error);
+    }
+    EXPECT_INT_EQ(ctx, tokens.items[0].type, TOKEN_LET);
+    EXPECT_INT_EQ(ctx, tokens.items[1].line, 1);
+    token_array_free(&tokens);
+
+    EXPECT_FALSE(ctx, lex_source("let x = 1; /* oops", &tokens, &error));
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_TRUE(ctx, strstr(error, "unterminated block comment") != NULL);
+    if (error != NULL) {
+        free(error);
+    }
+
+    {
+        const char *source =
+            "let a = \"line\\rbreak\";\n"
+            "let b = \"a\\bb\";\n"
+            "let c = \"\\u0041\\x42\";\n"
+            "let d = 'single';\n";
+
+        EXPECT_TRUE(ctx, lex_source(source, &tokens, &error));
+        if (error != NULL) {
+            free(error);
+        }
+        EXPECT_STRING_EQ(ctx, tokens.items[3].lexeme, "line\rbreak");
+        EXPECT_STRING_EQ(ctx, tokens.items[8].lexeme, "a\bb");
+        EXPECT_STRING_EQ(ctx, tokens.items[13].lexeme, "AB");
+        EXPECT_STRING_EQ(ctx, tokens.items[18].lexeme, "single");
+        token_array_free(&tokens);
+    }
+
+    EXPECT_FALSE(ctx, lex_source("let x = \"\\xZZ\";", &tokens, &error));
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_TRUE(ctx, strstr(error, "invalid hexadecimal escape sequence") != NULL);
+    if (error != NULL) {
+        free(error);
+    }
+
+    EXPECT_FALSE(ctx, lex_source("let x = \"\\uD800\";", &tokens, &error));
+    EXPECT_TRUE(ctx, error != NULL);
+    EXPECT_TRUE(ctx, strstr(error, "surrogate escape sequences are unsupported") != NULL);
+    if (error != NULL) {
+        free(error);
+    }
 }

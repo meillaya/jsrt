@@ -32,6 +32,7 @@ typedef struct {
     Value *stack;
     size_t stack_count;
     size_t stack_capacity;
+    bool stack_underflow;
     VmFrame *frames;
     size_t frame_count;
     size_t frame_capacity;
@@ -165,7 +166,12 @@ static bool vm_push(Vm *vm, Value value) {
 }
 
 static Value vm_pop(Vm *vm) {
-    return vm->stack[--vm->stack_count];
+    if (vm->stack_count == 0U) {
+        vm->stack_underflow = true;
+        return value_null();
+    }
+    vm->stack_count -= 1U;
+    return vm->stack[vm->stack_count];
 }
 
 static Value *vm_peek(Vm *vm, size_t distance) {
@@ -454,7 +460,7 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
         goto cleanup;
     }
 
-    vm_push_frame(&vm, NULL, &program->functions[0], false, 0U, 0U, 0U);
+    vm_push_frame(&vm, NULL, program->functions[0], false, 0U, 0U, 0U);
 
     while (vm.frame_count > 0U) {
         VmFrame *frame = &vm.frames[vm.frame_count - 1U];
@@ -466,6 +472,11 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
         }
 
         instruction = &frame->function->instructions[frame->ip++];
+
+        if (eval_interrupt_requested()) {
+            result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_INTERNAL, "execution interrupted");
+            goto cleanup;
+        }
 
         switch (instruction->op) {
             case BC_CONST:
@@ -673,21 +684,41 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             }
             case BC_MAKE_OBJECT: {
                 size_t count = (size_t)instruction->operand;
-                JsObject *object = vm_create_object(count);
+                size_t base;
                 size_t i;
-                for (i = count; i > 0; --i) {
-                    Value value = vm_pop(&vm);
-                    Value key = vm_pop(&vm);
-                    if (key.type != VALUE_STRING) {
-                        value_free(value);
-                        value_free(key);
+                JsObject *object;
+
+                if (vm.stack_count < count * 2U) {
+                    result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_INTERNAL, "stack underflow during object literal");
+                    goto cleanup;
+                }
+                base = vm.stack_count - count * 2U;
+                for (i = 0U; i < count; ++i) {
+                    if (vm.stack[base + 2U * i].type != VALUE_STRING) {
                         result = vm_runtime_error(&vm, RUNTIME_ERROR_TYPE, "object literal key must be a string");
                         goto cleanup;
                     }
-                    object->items[i - 1U].key = jsrt_strdup(key.as.string);
-                    object->items[i - 1U].value = value;
-                    value_free(key);
                 }
+                object = vm_create_object(count);
+                object->count = 0U;
+                for (i = 0U; i < count; ++i) {
+                    const char *key = vm.stack[base + 2U * i].as.string;
+                    Value value = vm.stack[base + 2U * i + 1U];
+                    ptrdiff_t existing = vm_object_find_key(object, key);
+                    if (existing >= 0) {
+                        /* The last value for a duplicate key wins. */
+                        value_free(object->items[(size_t)existing].value);
+                        object->items[(size_t)existing].value = value;
+                    } else {
+                        object->items[object->count].key = jsrt_strdup(key);
+                        object->items[object->count].value = value;
+                        object->count += 1U;
+                    }
+                }
+                for (i = 0U; i < count; ++i) {
+                    value_free(vm.stack[base + 2U * i]);
+                }
+                vm.stack_count = base;
                 vm_push(&vm, value_object_take(object));
                 break;
             }
@@ -904,6 +935,10 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     );
                     goto cleanup;
                 }
+                if (vm.frame_count > JSRT_MAX_CALL_DEPTH) {
+                    result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_INTERNAL, "maximum call depth exceeded");
+                    goto cleanup;
+                }
                 value_free(vm.stack[callee_index]);
                 vm.stack[callee_index] = value_null();
                 vm_push_frame(
@@ -985,6 +1020,10 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                     );
                     goto cleanup;
                 }
+                if (vm.frame_count > JSRT_MAX_CALL_DEPTH) {
+                    result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_INTERNAL, "maximum call depth exceeded");
+                    goto cleanup;
+                }
                 vm_push_frame(
                     &vm,
                     callee->as.function,
@@ -998,7 +1037,7 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             }
             case BC_MAKE_FUNCTION:
             {
-                JsFunction *closure = vm_create_compiled_function(&program->functions[(size_t)instruction->operand]);
+                JsFunction *closure = vm_create_compiled_function(program->functions[(size_t)instruction->operand]);
                 size_t i;
                 for (i = 0; i < closure->capture_count; ++i) {
                     BytecodeUpvalue upvalue = closure->bytecode->upvalues[i];
@@ -1019,6 +1058,11 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
             case BC_RETURN: {
                 Value return_value = vm_pop(&vm);
 
+                if (vm.stack_underflow) {
+                    value_free(return_value);
+                    result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_INTERNAL, "vm stack underflow");
+                    goto cleanup;
+                }
                 if (vm.frame_count == 1U) {
                     vm_free_stack(&vm, 0U);
                     result = vm_result_ok(return_value);
@@ -1044,6 +1088,11 @@ EvalResult vm_execute_program(const BytecodeProgram *program, const char *source
                 }
                 break;
             }
+        }
+
+        if (vm.stack_underflow) {
+            result = vm_instruction_error(&vm, instruction, RUNTIME_ERROR_INTERNAL, "vm stack underflow");
+            goto cleanup;
         }
     }
 

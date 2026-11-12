@@ -406,4 +406,143 @@ void run_parser_tests(TestContext *ctx) {
         free(error);
         token_array_free(&tokens);
     }
+
+    {
+        TokenArray tokens;
+        StmtArray nested;
+        char *error = NULL;
+
+        /* A final statement needs no terminator at end of file or before a
+         * closing brace. Two statements on separate lines still do. */
+        program = parse_program_or_fail(ctx, "let x = 1;\nx");
+        EXPECT_SIZE_EQ(ctx, program.count, 2U);
+        stmt_array_free(&program);
+
+        program = parse_program_or_fail(ctx, "function f() { return 1 }\nf();");
+        EXPECT_SIZE_EQ(ctx, program.count, 2U);
+        stmt_array_free(&program);
+
+        EXPECT_TRUE(ctx, lex_source("let x = 1\nlet y = 2;", &tokens, &error));
+        if (error != NULL) {
+            free(error);
+            error = NULL;
+        }
+        EXPECT_FALSE(ctx, parse_tokens(&tokens, "let x = 1\nlet y = 2;", &nested, &error));
+        EXPECT_TRUE(ctx, error != NULL);
+        EXPECT_TRUE(ctx, strstr(error, "expected ';' after variable declaration") != NULL);
+        free(error);
+        token_array_free(&tokens);
+    }
+
+    {
+        TokenArray tokens;
+        StmtArray incomplete;
+        char *error = NULL;
+        const char *sources[] = {
+            "export default 1;",
+            "default;",
+            "case 1:",
+            "{ default; }",
+            "function f() { default; }"
+        };
+        size_t index;
+
+        /* Error recovery used to stall on tokens that synchronize stops at
+         * without consuming, which made these inputs hang instead of fail. */
+        for (index = 0; index < sizeof(sources) / sizeof(sources[0]); ++index) {
+            EXPECT_TRUE(ctx, lex_source(sources[index], &tokens, &error));
+            if (error != NULL) {
+                free(error);
+                error = NULL;
+            }
+            EXPECT_FALSE(ctx, parse_tokens(&tokens, sources[index], &incomplete, &error));
+            EXPECT_TRUE(ctx, error != NULL);
+            free(error);
+            error = NULL;
+            token_array_free(&tokens);
+        }
+    }
+
+    {
+        TokenArray tokens;
+        StmtArray nested;
+        char *error = NULL;
+        size_t depth = JSRT_MAX_PARSE_DEPTH + 20U;
+        char *source = malloc(depth * 2U + 16U);
+        size_t index = 0;
+        size_t cursor = 0;
+
+        EXPECT_TRUE(ctx, source != NULL);
+        if (source != NULL) {
+            memcpy(source + cursor, "let x = ", 8U);
+            cursor += 8U;
+            for (index = 0; index < depth; ++index) {
+                source[cursor++] = '(';
+            }
+            source[cursor++] = '1';
+            for (index = 0; index < depth; ++index) {
+                source[cursor++] = ')';
+            }
+            source[cursor++] = ';';
+            source[cursor] = '\0';
+
+            EXPECT_TRUE(ctx, lex_source(source, &tokens, &error));
+            if (error != NULL) {
+                free(error);
+                error = NULL;
+            }
+            EXPECT_FALSE(ctx, parse_tokens(&tokens, source, &nested, &error));
+            EXPECT_TRUE(ctx, error != NULL);
+            EXPECT_TRUE(ctx, strstr(error, "source nesting is too deep") != NULL);
+            free(error);
+            token_array_free(&tokens);
+            free(source);
+        }
+    }
+
+    {
+        /* Reserved words are legal property names, and trailing commas are
+         * allowed in literals and parameter lists. */
+        program = parse_program_or_fail(
+            ctx,
+            "let o = {class: 1, default: 2,};\n"
+            "let v = o.class + o.default;\n"
+            "let a = [1, 2, 3,];\n"
+            "function f(x, y,) { return x + y; }\n"
+        );
+        EXPECT_SIZE_EQ(ctx, program.count, 4U);
+        stmt_array_free(&program);
+    }
+
+    {
+        size_t count = JSRT_MAX_EXPR_CHAIN + 10U;
+        char *source = malloc(count * 2U + 4U);
+        size_t index;
+        size_t cursor = 0;
+        TokenArray tokens;
+        StmtArray stmts;
+        char *error = NULL;
+
+        EXPECT_TRUE(ctx, source != NULL);
+        if (source != NULL) {
+            source[cursor++] = '1';
+            for (index = 0; index < count; ++index) {
+                source[cursor++] = '+';
+                source[cursor++] = '1';
+            }
+            source[cursor] = '\0';
+
+            EXPECT_TRUE(ctx, lex_source(source, &tokens, &error));
+            if (error != NULL) {
+                free(error);
+                error = NULL;
+            }
+            EXPECT_FALSE(ctx, parse_tokens(&tokens, source, &stmts, &error));
+            EXPECT_TRUE(ctx, error != NULL);
+            EXPECT_TRUE(ctx, strstr(error, "expression chain is too long") != NULL);
+            free(error);
+            token_array_free(&tokens);
+            free(source);
+        }
+    }
 }

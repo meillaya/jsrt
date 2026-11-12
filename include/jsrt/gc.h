@@ -54,6 +54,12 @@ void gc_temp_root_push_value(GcTempRoot *root, const struct Value *value);
 void gc_temp_root_push_env(GcTempRoot *root, struct Env *env);
 void gc_temp_root_pop(GcTempRoot *root);
 
+/* Environments that must survive every collection until the owner removes
+ * them. Module records use this to keep a loaded module environment reachable
+ * while the record itself lives on the C heap rather than the GC registry. */
+void gc_add_env_root(struct Env *env);
+void gc_remove_env_root(struct Env *env);
+
 void gc_collect(struct Env *root_env, const struct Value *root_value);
 void gc_collect_with_reason(struct Env *root_env, const struct Value *root_value, const char *reason);
 void gc_reset_stats(void);

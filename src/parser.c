@@ -14,6 +14,7 @@ typedef struct {
     size_t current;
     char *error_message;
     int error_count;
+    int depth;
     bool panic_mode;
 } Parser;
 
@@ -52,6 +53,10 @@ static bool match(Parser *parser, TokenType type) {
 }
 
 static void append_error(Parser *parser, char *diagnostic) {
+    if (parser->error_count >= JSRT_MAX_PARSE_ERRORS) {
+        free(diagnostic);
+        return;
+    }
     if (parser->error_message == NULL) {
         parser->error_message = diagnostic;
     } else {
@@ -61,6 +66,15 @@ static void append_error(Parser *parser, char *diagnostic) {
         parser->error_message = joined;
     }
     parser->error_count += 1;
+    if (parser->error_count == JSRT_MAX_PARSE_ERRORS) {
+        char *note = jsrt_format(
+            "%s\n\nToo many errors; stopping after %d.",
+            parser->error_message,
+            JSRT_MAX_PARSE_ERRORS
+        );
+        free(parser->error_message);
+        parser->error_message = note;
+    }
 }
 
 static void set_error(Parser *parser, const Token *token, const char *message) {
@@ -132,8 +146,86 @@ static void synchronize(Parser *parser) {
     }
 }
 
+/* Error recovery must always consume something. Some tokens, such as 'default'
+ * at statement level, stop synchronize without being consumed; without this
+ * check a malformed program sends the statement loops around forever. */
+static Stmt *parse_declaration(Parser *parser);
+
+static Stmt *parse_next_statement(Parser *parser) {
+    size_t start = parser->current;
+    Stmt *statement = parse_declaration(parser);
+
+    if (statement == NULL) {
+        synchronize(parser);
+        if (parser->current == start && !is_at_end(parser)) {
+            advance(parser);
+        }
+    }
+    return statement;
+}
+
 static bool consume(Parser *parser, TokenType type, const char *message) {
     if (check(parser, type)) {
+        advance(parser);
+        return true;
+    }
+    set_error(parser, peek(parser), message);
+    return false;
+}
+
+/* jsrt inserts a semicolon only where the next token is a closing brace or the
+ * end of the file. Full automatic semicolon insertion is outside the language
+ * subset, so a missing terminator between two statements stays an error. */
+static bool consume_statement_terminator(Parser *parser, const char *message) {
+    if (match(parser, TOKEN_SEMICOLON)) {
+        return true;
+    }
+    if (check(parser, TOKEN_RIGHT_BRACE) || is_at_end(parser)) {
+        return true;
+    }
+    set_error(parser, peek(parser), message);
+    return false;
+}
+
+/* Property names after '.' and object literal keys may be reserved words:
+ * o.default and {class: 1} are legal JavaScript. */
+static bool token_is_property_name(TokenType type) {
+    switch (type) {
+        case TOKEN_IDENTIFIER:
+        case TOKEN_LET:
+        case TOKEN_CONST:
+        case TOKEN_FUNCTION:
+        case TOKEN_CLASS:
+        case TOKEN_EXTENDS:
+        case TOKEN_SUPER:
+        case TOKEN_IMPORT:
+        case TOKEN_EXPORT:
+        case TOKEN_FROM:
+        case TOKEN_AS:
+        case TOKEN_RETURN:
+        case TOKEN_IF:
+        case TOKEN_ELSE:
+        case TOKEN_DO:
+        case TOKEN_FOR:
+        case TOKEN_WHILE:
+        case TOKEN_SWITCH:
+        case TOKEN_CASE:
+        case TOKEN_DEFAULT:
+        case TOKEN_BREAK:
+        case TOKEN_CONTINUE:
+        case TOKEN_TRUE:
+        case TOKEN_FALSE:
+        case TOKEN_NULL:
+        case TOKEN_THIS:
+        case TOKEN_NEW:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool consume_property_name(Parser *parser, const char *message) {
+    if (token_is_property_name(peek(parser)->type)) {
         advance(parser);
         return true;
     }
@@ -144,6 +236,7 @@ static bool consume(Parser *parser, TokenType type, const char *message) {
 static Expr *parse_expression(Parser *parser);
 static Stmt *parse_declaration(Parser *parser);
 static Stmt *parse_statement(Parser *parser);
+static Stmt *parse_statement_inner(Parser *parser);
 static Expr *parse_assignment(Parser *parser);
 static Stmt *parse_var_declaration(Parser *parser, bool is_const);
 static Stmt *parse_class_declaration(Parser *parser);
@@ -159,12 +252,15 @@ static bool parse_function_tail(
     }
 
     if (!check(parser, TOKEN_RIGHT_PAREN)) {
-        do {
+        for (;;) {
             if (!consume(parser, TOKEN_IDENTIFIER, "expected parameter name")) {
                 return false;
             }
             string_array_push(params, jsrt_strdup(previous(parser)->lexeme));
-        } while (match(parser, TOKEN_COMMA));
+            if (!match(parser, TOKEN_COMMA) || check(parser, TOKEN_RIGHT_PAREN)) {
+                break;
+            }
+        }
     }
 
     if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after parameters")) {
@@ -175,11 +271,9 @@ static bool parse_function_tail(
     }
 
     while (!check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
-        Stmt *statement = parse_declaration(parser);
+        Stmt *statement = parse_next_statement(parser);
         if (statement != NULL) {
             stmt_array_push(body, statement);
-        } else {
-            synchronize(parser);
         }
     }
 
@@ -197,7 +291,15 @@ static Expr *parse_new_target(Parser *parser) {
         return NULL;
     }
 
+    size_t chain = 0;
+
     for (;;) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
+            expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
+            return NULL;
+        }
+        chain += 1;
         if (match(parser, TOKEN_LEFT_BRACKET)) {
             const Token *open = previous(parser);
             Expr *index = parse_expression(parser);
@@ -215,7 +317,7 @@ static Expr *parse_new_target(Parser *parser) {
         }
         if (match(parser, TOKEN_DOT)) {
             const Token *dot = previous(parser);
-            if (!consume(parser, TOKEN_IDENTIFIER, "expected property name after '.'")) {
+            if (!consume_property_name(parser, "expected property name after '.'")) {
                 expr_destroy(expr);
                 return NULL;
             }
@@ -410,14 +512,17 @@ static Expr *parse_array_literal(Parser *parser, const Token *open) {
     expr_array_init(&elements);
 
     if (!check(parser, TOKEN_RIGHT_BRACKET)) {
-        do {
+        for (;;) {
             Expr *element = parse_expression(parser);
             if (element == NULL) {
                 expr_array_free(&elements);
                 return NULL;
             }
             expr_array_push(&elements, element);
-        } while (match(parser, TOKEN_COMMA));
+            if (!match(parser, TOKEN_COMMA) || check(parser, TOKEN_RIGHT_BRACKET)) {
+                break;
+            }
+        }
     }
 
     if (!consume(parser, TOKEN_RIGHT_BRACKET, "expected ']' after array literal")) {
@@ -432,10 +537,13 @@ static Expr *parse_object_literal(Parser *parser, const Token *open) {
     object_property_array_init(&properties);
 
     if (!check(parser, TOKEN_RIGHT_BRACE)) {
-        do {
+        for (;;) {
             char *key;
             Expr *value;
             if (match(parser, TOKEN_IDENTIFIER) || match(parser, TOKEN_STRING)) {
+                key = jsrt_strdup(previous(parser)->lexeme);
+            } else if (token_is_property_name(peek(parser)->type)) {
+                advance(parser);
                 key = jsrt_strdup(previous(parser)->lexeme);
             } else {
                 set_error(parser, peek(parser), "expected object property name");
@@ -459,7 +567,10 @@ static Expr *parse_object_literal(Parser *parser, const Token *open) {
                 property.value = value;
                 object_property_array_push(&properties, property);
             }
-        } while (match(parser, TOKEN_COMMA));
+            if (!match(parser, TOKEN_COMMA) || check(parser, TOKEN_RIGHT_BRACE)) {
+                break;
+            }
+        }
     }
 
     if (!consume(parser, TOKEN_RIGHT_BRACE, "expected '}' after object literal")) {
@@ -541,11 +652,19 @@ static Expr *parse_primary(Parser *parser) {
 
 static Expr *parse_postfix(Parser *parser) {
     Expr *expr = parse_primary(parser);
+    size_t chain = 0;
+
     if (expr == NULL) {
         return NULL;
     }
 
     for (;;) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
+            expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
+            return NULL;
+        }
+        chain += 1;
         if (expr->kind == EXPR_NEW &&
             (check(parser, TOKEN_LEFT_PAREN) || check(parser, TOKEN_LEFT_BRACKET) || check(parser, TOKEN_DOT))) {
             set_error(parser, peek(parser), "postfix chaining after 'new' is unsupported for constructor calls");
@@ -557,7 +676,7 @@ static Expr *parse_postfix(Parser *parser) {
             ExprArray arguments;
             expr_array_init(&arguments);
             if (!check(parser, TOKEN_RIGHT_PAREN)) {
-                do {
+                for (;;) {
                     Expr *argument = parse_expression(parser);
                     if (argument == NULL) {
                         expr_array_free(&arguments);
@@ -565,7 +684,10 @@ static Expr *parse_postfix(Parser *parser) {
                         return NULL;
                     }
                     expr_array_push(&arguments, argument);
-                } while (match(parser, TOKEN_COMMA));
+                    if (!match(parser, TOKEN_COMMA) || check(parser, TOKEN_RIGHT_PAREN)) {
+                        break;
+                    }
+                }
             }
             if (!consume(parser, TOKEN_RIGHT_PAREN, "expected ')' after arguments")) {
                 expr_array_free(&arguments);
@@ -592,7 +714,7 @@ static Expr *parse_postfix(Parser *parser) {
         }
         if (match(parser, TOKEN_DOT)) {
             const Token *dot = previous(parser);
-            if (!consume(parser, TOKEN_IDENTIFIER, "expected property name after '.'")) {
+            if (!consume_property_name(parser, "expected property name after '.'")) {
                 expr_destroy(expr);
                 return NULL;
             }
@@ -608,7 +730,15 @@ static Expr *parse_postfix(Parser *parser) {
 static Expr *parse_unary(Parser *parser) {
     if (match(parser, TOKEN_BANG) || match(parser, TOKEN_MINUS)) {
         const Token *op = previous(parser);
-        Expr *right = parse_unary(parser);
+        Expr *right;
+
+        if (parser->depth >= JSRT_MAX_PARSE_DEPTH) {
+            set_error(parser, peek(parser), "source nesting is too deep");
+            return NULL;
+        }
+        parser->depth += 1;
+        right = parse_unary(parser);
+        parser->depth -= 1;
         if (right == NULL) {
             return NULL;
         }
@@ -619,85 +749,145 @@ static Expr *parse_unary(Parser *parser) {
 
 static Expr *parse_factor(Parser *parser) {
     Expr *expr = parse_unary(parser);
+    size_t chain = 0;
+
     while (expr != NULL && (match(parser, TOKEN_STAR) || match(parser, TOKEN_SLASH))) {
-        const Token *op = previous(parser);
-        Expr *right = parse_unary(parser);
-        if (right == NULL) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
             expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
             return NULL;
         }
-        expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        chain += 1;
+        {
+            const Token *op = previous(parser);
+            Expr *right = parse_unary(parser);
+            if (right == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        }
     }
     return expr;
 }
 
 static Expr *parse_term(Parser *parser) {
     Expr *expr = parse_factor(parser);
+    size_t chain = 0;
+
     while (expr != NULL && (match(parser, TOKEN_PLUS) || match(parser, TOKEN_MINUS))) {
-        const Token *op = previous(parser);
-        Expr *right = parse_factor(parser);
-        if (right == NULL) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
             expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
             return NULL;
         }
-        expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        chain += 1;
+        {
+            const Token *op = previous(parser);
+            Expr *right = parse_factor(parser);
+            if (right == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        }
     }
     return expr;
 }
 
 static Expr *parse_comparison(Parser *parser) {
     Expr *expr = parse_term(parser);
+    size_t chain = 0;
+
     while (expr != NULL && (match(parser, TOKEN_GREATER) || match(parser, TOKEN_GREATER_EQUAL) ||
             match(parser, TOKEN_LESS) || match(parser, TOKEN_LESS_EQUAL))) {
-        const Token *op = previous(parser);
-        Expr *right = parse_term(parser);
-        if (right == NULL) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
             expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
             return NULL;
         }
-        expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        chain += 1;
+        {
+            const Token *op = previous(parser);
+            Expr *right = parse_term(parser);
+            if (right == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        }
     }
     return expr;
 }
 
 static Expr *parse_equality(Parser *parser) {
     Expr *expr = parse_comparison(parser);
+    size_t chain = 0;
+
     while (expr != NULL && (match(parser, TOKEN_EQUAL_EQUAL) || match(parser, TOKEN_BANG_EQUAL))) {
-        const Token *op = previous(parser);
-        Expr *right = parse_comparison(parser);
-        if (right == NULL) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
             expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
             return NULL;
         }
-        expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        chain += 1;
+        {
+            const Token *op = previous(parser);
+            Expr *right = parse_comparison(parser);
+            if (right == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_binary(expr, op->type, right, op->line, op->column);
+        }
     }
     return expr;
 }
 
 static Expr *parse_logical_and(Parser *parser) {
     Expr *expr = parse_equality(parser);
+    size_t chain = 0;
+
     while (expr != NULL && match(parser, TOKEN_AND_AND)) {
-        const Token *op = previous(parser);
-        Expr *right = parse_equality(parser);
-        if (right == NULL) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
             expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
             return NULL;
         }
-        expr = ast_new_logical(expr, op->type, right, op->line, op->column);
+        chain += 1;
+        {
+            const Token *op = previous(parser);
+            Expr *right = parse_equality(parser);
+            if (right == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_logical(expr, op->type, right, op->line, op->column);
+        }
     }
     return expr;
 }
 
 static Expr *parse_logical_or(Parser *parser) {
     Expr *expr = parse_logical_and(parser);
+    size_t chain = 0;
+
     while (expr != NULL && match(parser, TOKEN_OR_OR)) {
-        const Token *op = previous(parser);
-        Expr *right = parse_logical_and(parser);
-        if (right == NULL) {
+        if (chain >= JSRT_MAX_EXPR_CHAIN) {
             expr_destroy(expr);
+            set_error(parser, peek(parser), "expression chain is too long");
             return NULL;
         }
-        expr = ast_new_logical(expr, op->type, right, op->line, op->column);
+        chain += 1;
+        {
+            const Token *op = previous(parser);
+            Expr *right = parse_logical_and(parser);
+            if (right == NULL) {
+                expr_destroy(expr);
+                return NULL;
+            }
+            expr = ast_new_logical(expr, op->type, right, op->line, op->column);
+        }
     }
     return expr;
 }
@@ -710,7 +900,16 @@ static Expr *parse_assignment(Parser *parser) {
 
     if (match(parser, TOKEN_EQUAL)) {
         const Token *equals = previous(parser);
-        Expr *value = parse_assignment(parser);
+        Expr *value;
+
+        if (parser->depth >= JSRT_MAX_PARSE_DEPTH) {
+            expr_destroy(expr);
+            set_error(parser, peek(parser), "source nesting is too deep");
+            return NULL;
+        }
+        parser->depth += 1;
+        value = parse_assignment(parser);
+        parser->depth -= 1;
         if (value == NULL) {
             expr_destroy(expr);
             return NULL;
@@ -730,7 +929,19 @@ static Expr *parse_assignment(Parser *parser) {
 }
 
 static Expr *parse_expression(Parser *parser) {
-    return parse_assignment(parser);
+    Expr *expression;
+
+    if (parser->error_count >= JSRT_MAX_PARSE_ERRORS) {
+        return NULL;
+    }
+    if (parser->depth >= JSRT_MAX_PARSE_DEPTH) {
+        set_error(parser, peek(parser), "source nesting is too deep");
+        return NULL;
+    }
+    parser->depth += 1;
+    expression = parse_assignment(parser);
+    parser->depth -= 1;
+    return expression;
 }
 
 static Stmt *parse_block_statement(Parser *parser, int line, int column) {
@@ -738,11 +949,9 @@ static Stmt *parse_block_statement(Parser *parser, int line, int column) {
     stmt_array_init(&statements);
 
     while (!check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
-        Stmt *statement = parse_declaration(parser);
+        Stmt *statement = parse_next_statement(parser);
         if (statement != NULL) {
             stmt_array_push(&statements, statement);
-        } else {
-            synchronize(parser);
         }
     }
 
@@ -757,13 +966,13 @@ static Stmt *parse_block_statement(Parser *parser, int line, int column) {
 static Stmt *parse_return_statement(Parser *parser) {
     const Token *keyword = previous(parser);
     Expr *value = NULL;
-    if (!check(parser, TOKEN_SEMICOLON)) {
+    if (!check(parser, TOKEN_SEMICOLON) && !check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
         value = parse_expression(parser);
         if (value == NULL) {
             return NULL;
         }
     }
-    if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after return value")) {
+    if (!consume_statement_terminator(parser, "expected ';' after return value")) {
         expr_destroy(value);
         return NULL;
     }
@@ -830,7 +1039,7 @@ static Stmt *parse_do_while_statement(Parser *parser) {
         expr_destroy(condition);
         return NULL;
     }
-    if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after do-while condition")) {
+    if (!consume_statement_terminator(parser, "expected ';' after do-while condition")) {
         stmt_destroy(body);
         expr_destroy(condition);
         return NULL;
@@ -907,11 +1116,9 @@ static Stmt *parse_switch_statement(Parser *parser) {
 
         while (!check(parser, TOKEN_CASE) && !check(parser, TOKEN_DEFAULT) &&
                !check(parser, TOKEN_RIGHT_BRACE) && !is_at_end(parser)) {
-            Stmt *statement = parse_declaration(parser);
+            Stmt *statement = parse_next_statement(parser);
             if (statement != NULL) {
                 stmt_array_push(&switch_case.statements, statement);
-            } else {
-                synchronize(parser);
             }
         }
 
@@ -1027,7 +1234,7 @@ static Stmt *parse_while_statement(Parser *parser) {
 static Stmt *parse_break_statement(Parser *parser) {
     const Token *keyword = previous(parser);
 
-    if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after 'break'")) {
+    if (!consume_statement_terminator(parser, "expected ';' after 'break'")) {
         return NULL;
     }
 
@@ -1037,7 +1244,7 @@ static Stmt *parse_break_statement(Parser *parser) {
 static Stmt *parse_continue_statement(Parser *parser) {
     const Token *keyword = previous(parser);
 
-    if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after 'continue'")) {
+    if (!consume_statement_terminator(parser, "expected ';' after 'continue'")) {
         return NULL;
     }
 
@@ -1049,7 +1256,7 @@ static Stmt *parse_expression_statement(Parser *parser) {
     if (expression == NULL) {
         return NULL;
     }
-    if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after expression")) {
+    if (!consume_statement_terminator(parser, "expected ';' after expression")) {
         expr_destroy(expression);
         return NULL;
     }
@@ -1057,6 +1264,22 @@ static Stmt *parse_expression_statement(Parser *parser) {
 }
 
 static Stmt *parse_statement(Parser *parser) {
+    Stmt *statement;
+
+    if (parser->error_count >= JSRT_MAX_PARSE_ERRORS) {
+        return NULL;
+    }
+    if (parser->depth >= JSRT_MAX_PARSE_DEPTH) {
+        set_error(parser, peek(parser), "source nesting is too deep");
+        return NULL;
+    }
+    parser->depth += 1;
+    statement = parse_statement_inner(parser);
+    parser->depth -= 1;
+    return statement;
+}
+
+static Stmt *parse_statement_inner(Parser *parser) {
     if (match(parser, TOKEN_IF)) {
         return parse_if_statement(parser);
     }
@@ -1105,7 +1328,7 @@ static Stmt *parse_var_declaration(Parser *parser, bool is_const) {
         set_error(parser, peek(parser), "const declarations require an initializer");
         return NULL;
     }
-    if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after variable declaration")) {
+    if (!consume_statement_terminator(parser, "expected ';' after variable declaration")) {
         expr_destroy(initializer);
         return NULL;
     }
@@ -1192,7 +1415,7 @@ static Stmt *parse_import_declaration(Parser *parser) {
     {
         const Token *path = previous(parser);
         Stmt *stmt;
-        if (!consume(parser, TOKEN_SEMICOLON, "expected ';' after import declaration")) {
+        if (!consume_statement_terminator(parser, "expected ';' after import declaration")) {
             import_specifier_array_free(&specifiers);
             return NULL;
         }
@@ -1246,6 +1469,209 @@ static Stmt *parse_declaration(Parser *parser) {
     return parse_statement(parser);
 }
 
+typedef struct {
+    const void *node;
+    bool is_statement;
+    int depth;
+} AstMeasureTask;
+
+static void ast_measure_push(
+    AstMeasureTask **tasks,
+    size_t *count,
+    size_t *capacity,
+    const void *node,
+    bool is_statement,
+    int depth
+) {
+    if (node == NULL) {
+        return;
+    }
+    if (*count == *capacity) {
+        size_t next_capacity = *capacity == 0U ? 64U : *capacity * 2U;
+        *tasks = jsrt_realloc(*tasks, next_capacity * sizeof(**tasks));
+        *capacity = next_capacity;
+    }
+    (*tasks)[*count].node = node;
+    (*tasks)[*count].is_statement = is_statement;
+    (*tasks)[*count].depth = depth;
+    *count += 1U;
+}
+
+static void ast_measure_position(const AstMeasureTask *task, int *line, int *column) {
+    if (task->is_statement) {
+        const Stmt *stmt = task->node;
+        *line = stmt->line;
+        *column = stmt->column;
+    } else {
+        const Expr *expr = task->node;
+        *line = expr->line;
+        *column = expr->column;
+    }
+}
+
+/* Walk the finished tree without recursion and reject trees that the
+ * evaluator, the compiler, or the destructor could not walk safely. */
+static bool ast_measure_program(const StmtArray *program, int *out_line, int *out_column, const char **out_reason) {
+    AstMeasureTask *tasks = NULL;
+    size_t count = 0U;
+    size_t capacity = 0U;
+    size_t visited = 0U;
+    size_t i;
+
+    for (i = 0; i < program->count; ++i) {
+        ast_measure_push(&tasks, &count, &capacity, program->items[i], true, 1);
+    }
+
+    while (count > 0U) {
+        AstMeasureTask task = tasks[--count];
+        int child_depth = task.depth + 1;
+
+        visited += 1U;
+        if (task.depth > JSRT_MAX_AST_DEPTH) {
+            ast_measure_position(&task, out_line, out_column);
+            *out_reason = "program nesting is too deep";
+            free(tasks);
+            return false;
+        }
+        if (visited > JSRT_MAX_AST_NODES) {
+            ast_measure_position(&task, out_line, out_column);
+            *out_reason = "program is too large";
+            free(tasks);
+            return false;
+        }
+
+        if (task.is_statement) {
+            const Stmt *stmt = task.node;
+            switch (stmt->kind) {
+                case STMT_EXPR:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.expr.expression, false, child_depth);
+                    break;
+                case STMT_VAR:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.var.initializer, false, child_depth);
+                    break;
+                case STMT_BLOCK:
+                    for (i = 0; i < stmt->as.block.statements.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, stmt->as.block.statements.items[i], true, child_depth);
+                    }
+                    break;
+                case STMT_IF:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.if_stmt.condition, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.if_stmt.then_branch, true, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.if_stmt.else_branch, true, child_depth);
+                    break;
+                case STMT_DO_WHILE:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.do_while_stmt.body, true, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.do_while_stmt.condition, false, child_depth);
+                    break;
+                case STMT_FOR:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.for_stmt.init, true, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.for_stmt.condition, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.for_stmt.increment, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.for_stmt.body, true, child_depth);
+                    break;
+                case STMT_WHILE:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.while_stmt.condition, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.while_stmt.body, true, child_depth);
+                    break;
+                case STMT_SWITCH:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.switch_stmt.expression, false, child_depth);
+                    for (i = 0; i < stmt->as.switch_stmt.cases.count; ++i) {
+                        const SwitchCase *switch_case = &stmt->as.switch_stmt.cases.items[i];
+                        ast_measure_push(&tasks, &count, &capacity, switch_case->value, false, child_depth);
+                        for (size_t j = 0; j < switch_case->statements.count; ++j) {
+                            ast_measure_push(&tasks, &count, &capacity, switch_case->statements.items[j], true, child_depth);
+                        }
+                    }
+                    break;
+                case STMT_IMPORT:
+                    break;
+                case STMT_EXPORT:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.export_stmt.declaration, true, child_depth);
+                    break;
+                case STMT_FUNCTION:
+                    for (i = 0; i < stmt->as.function.body.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, stmt->as.function.body.items[i], true, child_depth);
+                    }
+                    break;
+                case STMT_CLASS:
+                    for (i = 0; i < stmt->as.class_stmt.methods.count; ++i) {
+                        const ClassMethod *method = &stmt->as.class_stmt.methods.items[i];
+                        for (size_t j = 0; j < method->body.count; ++j) {
+                            ast_measure_push(&tasks, &count, &capacity, method->body.items[j], true, child_depth);
+                        }
+                    }
+                    break;
+                case STMT_RETURN:
+                    ast_measure_push(&tasks, &count, &capacity, stmt->as.return_stmt.value, false, child_depth);
+                    break;
+                case STMT_BREAK:
+                case STMT_CONTINUE:
+                    break;
+            }
+        } else {
+            const Expr *expr = task.node;
+            switch (expr->kind) {
+                case EXPR_LITERAL:
+                case EXPR_IDENTIFIER:
+                case EXPR_THIS:
+                    break;
+                case EXPR_UNARY:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.unary.operand, false, child_depth);
+                    break;
+                case EXPR_BINARY:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.binary.left, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.binary.right, false, child_depth);
+                    break;
+                case EXPR_LOGICAL:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.logical.left, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.logical.right, false, child_depth);
+                    break;
+                case EXPR_ASSIGN:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.assign.target, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.assign.value, false, child_depth);
+                    break;
+                case EXPR_CALL:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.call.callee, false, child_depth);
+                    for (i = 0; i < expr->as.call.arguments.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, expr->as.call.arguments.items[i], false, child_depth);
+                    }
+                    break;
+                case EXPR_NEW:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.new_expr.callee, false, child_depth);
+                    for (i = 0; i < expr->as.new_expr.arguments.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, expr->as.new_expr.arguments.items[i], false, child_depth);
+                    }
+                    break;
+                case EXPR_FUNCTION:
+                    for (i = 0; i < expr->as.function.body.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, expr->as.function.body.items[i], true, child_depth);
+                    }
+                    break;
+                case EXPR_ARRAY:
+                    for (i = 0; i < expr->as.array.elements.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, expr->as.array.elements.items[i], false, child_depth);
+                    }
+                    break;
+                case EXPR_OBJECT:
+                    for (i = 0; i < expr->as.object.properties.count; ++i) {
+                        ast_measure_push(&tasks, &count, &capacity, expr->as.object.properties.items[i].value, false, child_depth);
+                    }
+                    break;
+                case EXPR_INDEX:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.index.target, false, child_depth);
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.index.index, false, child_depth);
+                    break;
+                case EXPR_PROPERTY:
+                    ast_measure_push(&tasks, &count, &capacity, expr->as.property.target, false, child_depth);
+                    break;
+            }
+        }
+    }
+
+    free(tasks);
+    return true;
+}
+
 int parse_tokens(const TokenArray *tokens, const char *source, StmtArray *program, char **error_message) {
     Parser parser;
     parser.tokens = tokens;
@@ -1253,16 +1679,15 @@ int parse_tokens(const TokenArray *tokens, const char *source, StmtArray *progra
     parser.current = 0;
     parser.error_message = NULL;
     parser.error_count = 0;
+    parser.depth = 0;
     parser.panic_mode = false;
 
     stmt_array_init(program);
 
-    while (!is_at_end(&parser)) {
-        Stmt *statement = parse_declaration(&parser);
+    while (!is_at_end(&parser) && parser.error_count < JSRT_MAX_PARSE_ERRORS) {
+        Stmt *statement = parse_next_statement(&parser);
         if (statement != NULL) {
             stmt_array_push(program, statement);
-        } else {
-            synchronize(&parser);
         }
     }
 
@@ -1270,6 +1695,18 @@ int parse_tokens(const TokenArray *tokens, const char *source, StmtArray *progra
         stmt_array_free(program);
         *error_message = parser.error_message;
         return 0;
+    }
+
+    {
+        int line = 1;
+        int column = 1;
+        const char *reason = "";
+
+        if (!ast_measure_program(program, &line, &column, &reason)) {
+            *error_message = format_source_diagnostic("Parser error", source, line, column, 1, reason);
+            stmt_array_free(program);
+            return 0;
+        }
     }
 
     *error_message = NULL;
