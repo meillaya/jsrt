@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: jsrt
+Description: Small JavaScript-like runtime with an embeddable C API
+Version: @VERSION@
+Libs: -L${libdir} -ljsrt -lm
+Cflags: -I${includedir}

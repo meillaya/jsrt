@@ -58,8 +58,16 @@ pub fn build(b: *std.Build) void {
 
     const jsrt = addJsrtExecutable(b, target, optimize, .{});
     const test_jsrt = addTestExecutable(b, target, optimize, .{});
+    const jsrt_lib = addJsrtLibrary(b, target, optimize);
     b.installArtifact(jsrt);
     b.installArtifact(test_jsrt);
+    b.installArtifact(jsrt_lib);
+    b.getInstallStep().dependOn(&b.addInstallDirectory(.{
+        .source_dir = b.path("include"),
+        .install_dir = .header,
+        .install_subdir = "",
+        .include_extensions = &.{".h"},
+    }).step);
 
     const sync_default = addSyncStep(b, jsrt, test_jsrt, "sync build artifacts");
     b.default_step.dependOn(sync_default);
@@ -162,6 +170,26 @@ fn addTestExecutable(
     addCommonC(exe, b, options);
     exe.root_module.addCSourceFiles(.{ .files = test_sources, .flags = base_c_flags });
     return exe;
+}
+
+fn addJsrtLibrary(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .name = "jsrt",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            // Installed archives must link with a plain host C toolchain.
+            .sanitize_c = .off,
+        }),
+    });
+    addCommonC(lib, b, .{});
+    return lib;
 }
 
 fn addCommonC(exe: *std.Build.Step.Compile, b: *std.Build, options: ArtifactOptions) void {
