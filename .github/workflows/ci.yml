@@ -1,0 +1,75 @@
+# Continuous integration for jsrt.
+#
+# Three lanes cover the plain C build, the AddressSanitizer build, and the
+# Zig build.
+name: Continuous integration
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every job only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  plain-c:
+    name: Plain C
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and run the unit tests
+        run: make clean && make && make test
+      - name: Run CLI contract tests
+        run: bash scripts/cli.sh
+      - name: Run conformance checks
+        run: make conformance
+      - name: Run VM parity checks
+        run: make vm-parity
+      - name: Validate the Test262 manifest
+        run: make test262-adapter
+      - name: Run benchmark smoke checks
+        run: make bench-smoke
+      - name: Check prose style
+        run: make prose
+
+  sanitizers:
+    name: Sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Run the AddressSanitizer tests
+        run: make asan
+
+  zig:
+    name: Zig
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Run the unit tests
+        run: zig build test
+      - name: Run conformance checks
+        run: zig build conformance
+      - name: Run VM parity checks
+        run: zig build vm-parity
+      - name: Run production verification
+        run: zig build verify-production
