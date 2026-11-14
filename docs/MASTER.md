@@ -301,7 +301,7 @@ The conformance manifest has the columns `id,path,backends,expect,stdout,stderr_
 
 The Test262 subset manifest has the columns `id,feature,area,tier,source,local_path,backends,expect,stdout,stderr_contains,skip_reason,xfail_reason`. The `tier` column takes `supported`, `experimental`, `future`, or `rejected`; `backends` takes `tree`, `vm`, `both`, or blank; `expect` takes `success`, `failure`, `skip`, or `xfail`. A skip row needs `skip_reason`, an expected failure needs `xfail_reason`, and a non-skip row with `local_path` must point to an existing file.
 
-The GitHub Actions workflow in `.github/workflows/ci.yml` runs three jobs: the plain C build with the gates, the sanitizer lane, and the Zig lane.
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs three jobs: the plain C build with the gates, the sanitizer lane, and the Zig lane. Set the repository variable `CI_RUNNER` to a managed runner label to move the jobs to another GitHub Actions runner host without editing the workflow; leave it unset to use `ubuntu-latest`.
 
 ## Benchmarks
 

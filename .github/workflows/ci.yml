@@ -1,7 +1,9 @@
 # Continuous integration for jsrt.
 #
 # Three lanes cover the plain C build, the AddressSanitizer build, and the
-# Zig build.
+# Zig build. Set the repository variable CI_RUNNER to a managed runner label
+# to move the jobs off the standard GitHub runner; leave it unset to keep
+# ubuntu-latest.
 name: Continuous integration
 
 on:
@@ -19,14 +21,10 @@ permissions:
 jobs:
   plain-c:
     name: Plain C
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Build and run the unit tests
         run: make clean && make && make test
       - name: Run CLI contract tests
@@ -44,7 +42,7 @@ jobs:
 
   sanitizers:
     name: Sanitizers
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -57,7 +55,7 @@ jobs:
 
   zig:
     name: Zig
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
