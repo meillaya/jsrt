@@ -277,6 +277,8 @@ static void stringify_buffer_init(StringifyBuffer *buffer) {
 }
 
 static void stringify_append(StringifyBuffer *buffer, const char *text, size_t length) {
+    size_t needed;
+
     if (buffer->truncated) {
         return;
     }
@@ -284,10 +286,13 @@ static void stringify_append(StringifyBuffer *buffer, const char *text, size_t l
         buffer->truncated = true;
         return;
     }
-    while (buffer->length + length + 1U > buffer->capacity) {
-        buffer->capacity *= 2U;
+    needed = buffer->length + length + 1U;
+    if (needed > buffer->capacity) {
+        while (needed > buffer->capacity) {
+            buffer->capacity *= 2U;
+        }
+        buffer->data = jsrt_realloc(buffer->data, buffer->capacity);
     }
-    buffer->data = jsrt_realloc(buffer->data, buffer->capacity);
     memcpy(buffer->data + buffer->length, text, length);
     buffer->length += length;
     buffer->data[buffer->length] = '\0';
